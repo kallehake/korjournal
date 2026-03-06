@@ -16,6 +16,8 @@ interface ActiveTrip {
   odometerStart: number;
   startAddress: string;
   tripType: 'business' | 'private';
+  startLat: number | null;
+  startLng: number | null;
 }
 
 const STORAGE_KEY = 'korjournal_active_trip';
@@ -40,6 +42,23 @@ async function reverseGeocode(lat: number, lng: number): Promise<string> {
     return parts.join(', ') || `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
   } catch {
     return `${lat.toFixed(4)}, ${lng.toFixed(4)}`;
+  }
+}
+
+async function calculateRouteDistanceKm(
+  startLat: number, startLng: number,
+  endLat: number, endLng: number,
+): Promise<number | null> {
+  try {
+    const url = `https://router.project-osrm.org/route/v1/driving/${startLng},${startLat};${endLng},${endLat}?overview=false`;
+    const res = await fetch(url);
+    const data = await res.json();
+    if (data.code === 'Ok' && data.routes?.[0]) {
+      return Math.round(data.routes[0].distance / 1000);
+    }
+    return null;
+  } catch {
+    return null;
   }
 }
 
@@ -80,7 +99,10 @@ export default function DrivePage() {
   const [tripType, setTripType] = useState<'business' | 'private'>('business');
   const [odometerStart, setOdometerStart] = useState('');
   const [startAddress, setStartAddress] = useState('');
+  const [startCoords, setStartCoords] = useState<{ lat: number; lng: number } | null>(null);
   const [gpsLoading, setGpsLoading] = useState(false);
+  const [routeDistanceKm, setRouteDistanceKm] = useState<number | null>(null);
+  const [calculatingRoute, setCalculatingRoute] = useState(false);
   const [obd2Status, setObd2Status] = useState<'idle' | 'connecting' | 'reading' | 'error'>('idle');
   const [obd2Error, setObd2Error] = useState<string | null>(null);
   const [starting, setStarting] = useState(false);
@@ -92,6 +114,7 @@ export default function DrivePage() {
   const [purpose, setPurpose] = useState('');
   const [visitedPerson, setVisitedPerson] = useState('');
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
+  const [selectedProjectId, setSelectedProjectId] = useState('');
   const [notes, setNotes] = useState('');
   const [completing, setCompleting] = useState(false);
   const [completeError, setCompleteError] = useState<string | null>(null);
@@ -117,6 +140,18 @@ export default function DrivePage() {
       const { data } = await supabase
         .from('customers')
         .select('id, name')
+        .eq('is_active', true)
+        .order('name');
+      return data ?? [];
+    },
+  });
+
+  const { data: projects } = useQuery({
+    queryKey: ['projects-active'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('projects')
+        .select('id, customer_id, name')
         .eq('is_active', true)
         .order('name');
       return data ?? [];
@@ -177,14 +212,32 @@ export default function DrivePage() {
     setGpsLoading(true);
     try {
       const pos = await getCurrentPosition();
-      const addr = await reverseGeocode(pos.coords.latitude, pos.coords.longitude);
+      const { latitude: lat, longitude: lng } = pos.coords;
+      const addr = await reverseGeocode(lat, lng);
       setter(addr);
+      setStartCoords({ lat, lng });
     } catch {
       // Let user fill in manually
     } finally {
       setGpsLoading(false);
     }
   }, []);
+
+  // Silently fetch GPS on page load to have start coordinates ready
+  useEffect(() => {
+    if (phase !== 'idle') return;
+    getCurrentPosition()
+      .then((pos) => {
+        const { latitude: lat, longitude: lng } = pos.coords;
+        setStartCoords({ lat, lng });
+        setStartAddress((prev) => prev || '');
+        reverseGeocode(lat, lng).then((addr) => {
+          setStartAddress((prev) => prev || addr);
+        });
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [phase]);
 
   // ─── OBD2 ────────────────────────────────────────────────────────────────
 
@@ -255,6 +308,8 @@ export default function DrivePage() {
         odometerStart: parseInt(odometerStart, 10),
         startAddress: startAddress || 'Okänd adress',
         tripType,
+        startLat: startCoords?.lat ?? null,
+        startLng: startCoords?.lng ?? null,
       };
 
       localStorage.setItem(STORAGE_KEY, JSON.stringify(activeTripData));
@@ -271,8 +326,33 @@ export default function DrivePage() {
 
   const handleStop = useCallback(async () => {
     setPhase('completing');
-    fetchGpsAddress(setEndAddress);
-  }, [fetchGpsAddress]);
+    setCalculatingRoute(true);
+    setRouteDistanceKm(null);
+
+    try {
+      const pos = await getCurrentPosition();
+      const { latitude: endLat, longitude: endLng } = pos.coords;
+
+      // Get end address
+      reverseGeocode(endLat, endLng).then(setEndAddress);
+
+      // Calculate route distance if we have start coords
+      if (activeTrip?.startLat != null && activeTrip?.startLng != null) {
+        const distKm = await calculateRouteDistanceKm(
+          activeTrip.startLat, activeTrip.startLng,
+          endLat, endLng,
+        );
+        if (distKm !== null && activeTrip?.odometerStart) {
+          setOdometerEnd((activeTrip.odometerStart + distKm).toString());
+          setRouteDistanceKm(distKm);
+        }
+      }
+    } catch {
+      // GPS unavailable — let user fill in
+    } finally {
+      setCalculatingRoute(false);
+    }
+  }, [activeTrip]);
 
   // ─── Complete trip ────────────────────────────────────────────────────────
 
@@ -287,10 +367,11 @@ export default function DrivePage() {
         .update({
           end_time: new Date().toISOString(),
           end_address: endAddress || 'Okänd adress',
-          odometer_end: parseInt(odometerEnd, 10),
+          odometer_end: odometerEnd ? parseInt(odometerEnd, 10) : null,
           purpose: purpose || null,
           visited_person: visitedPerson || null,
           customer_id: selectedCustomerId || null,
+          project_id: selectedProjectId || null,
           notes: notes || null,
           status: 'completed',
         })
@@ -316,6 +397,7 @@ export default function DrivePage() {
       setPurpose('');
       setVisitedPerson('');
       setSelectedCustomerId('');
+      setSelectedProjectId('');
       setNotes('');
     } catch (e) {
       setCompleteError(e instanceof Error ? e.message : 'Kunde inte spara resa');
@@ -394,29 +476,34 @@ export default function DrivePage() {
         {/* Odometer end */}
         <div>
           <label className="block text-sm font-semibold text-gray-700 mb-1">
-            Mätarställning slut (km) *
+            Mätarställning slut (km)
           </label>
-          <input
-            className="w-full rounded-xl border border-gray-300 px-4 py-3 text-sm bg-white"
-            value={odometerEnd}
-            onChange={(e) => setOdometerEnd(e.target.value)}
-            type="number"
-            inputMode="numeric"
-            placeholder="T.ex. 45 230"
-          />
-          <div className="flex items-center justify-between mt-2">
-            {obd2EndError && <p className="text-xs text-red-600 flex-1">{obd2EndError}</p>}
-            {obd2EndStatus !== 'idle' && obd2EndStatus !== 'error' && (
-              <p className="text-xs text-blue-600 flex-1">{obd2Label}</p>
-            )}
-            <button
-              onClick={() => readObd2Odometer(setObd2EndStatus, setObd2EndError, setOdometerEnd)}
-              disabled={obd2Busy}
-              className="ml-auto text-sm font-semibold text-blue-600 border border-blue-300 rounded-lg px-3 py-1.5 disabled:opacity-50"
-            >
-              {obd2Busy ? '...' : 'Läs från OBD2'}
-            </button>
-          </div>
+          {calculatingRoute ? (
+            <div className="w-full rounded-xl border border-blue-200 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+              Beräknar körsträcka via karta...
+            </div>
+          ) : (
+            <>
+              <input
+                className="w-full rounded-xl border border-gray-300 px-4 py-3 text-sm bg-white"
+                value={odometerEnd}
+                onChange={(e) => setOdometerEnd(e.target.value)}
+                type="number"
+                inputMode="numeric"
+                placeholder="Auto-beräknas via GPS"
+              />
+              {routeDistanceKm !== null && (
+                <p className="text-xs text-green-700 mt-1">
+                  Beräknad körsträcka: {routeDistanceKm} km (via vägkarta)
+                </p>
+              )}
+              {!odometerEnd && !calculatingRoute && (
+                <p className="text-xs text-amber-600 mt-1">
+                  GPS-beräkning misslyckades — fyll i manuellt
+                </p>
+              )}
+            </>
+          )}
         </div>
 
         {/* Purpose */}
@@ -447,7 +534,7 @@ export default function DrivePage() {
             <label className="block text-sm font-semibold text-gray-700 mb-2">Kund</label>
             <div className="flex flex-wrap gap-2">
               <button
-                onClick={() => setSelectedCustomerId('')}
+                onClick={() => { setSelectedCustomerId(''); setSelectedProjectId(''); }}
                 className={`rounded-full px-4 py-2 text-sm font-medium border ${
                   !selectedCustomerId
                     ? 'bg-blue-600 text-white border-blue-600'
@@ -459,7 +546,7 @@ export default function DrivePage() {
               {customers.map((c) => (
                 <button
                   key={c.id}
-                  onClick={() => setSelectedCustomerId(c.id)}
+                  onClick={() => { setSelectedCustomerId(c.id); setSelectedProjectId(''); }}
                   className={`rounded-full px-4 py-2 text-sm font-medium border ${
                     selectedCustomerId === c.id
                       ? 'bg-blue-600 text-white border-blue-600'
@@ -469,6 +556,40 @@ export default function DrivePage() {
                   {c.name}
                 </button>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* Project (visas om kund är vald och har projekt) */}
+        {selectedCustomerId && projects && projects.filter((p: any) => p.customer_id === selectedCustomerId).length > 0 && (
+          <div>
+            <label className="block text-sm font-semibold text-gray-700 mb-2">Projekt</label>
+            <div className="flex flex-wrap gap-2">
+              <button
+                onClick={() => setSelectedProjectId('')}
+                className={`rounded-full px-4 py-2 text-sm font-medium border ${
+                  !selectedProjectId
+                    ? 'bg-blue-600 text-white border-blue-600'
+                    : 'bg-white text-gray-600 border-gray-300'
+                }`}
+              >
+                Inget projekt
+              </button>
+              {projects
+                .filter((p: any) => p.customer_id === selectedCustomerId)
+                .map((p: any) => (
+                  <button
+                    key={p.id}
+                    onClick={() => setSelectedProjectId(p.id)}
+                    className={`rounded-full px-4 py-2 text-sm font-medium border ${
+                      selectedProjectId === p.id
+                        ? 'bg-blue-600 text-white border-blue-600'
+                        : 'bg-white text-gray-600 border-gray-300'
+                    }`}
+                  >
+                    {p.name}
+                  </button>
+                ))}
             </div>
           </div>
         )}
@@ -495,10 +616,10 @@ export default function DrivePage() {
           </button>
           <button
             onClick={handleComplete}
-            disabled={completing || !odometerEnd}
+            disabled={completing || calculatingRoute}
             className="flex-1 py-4 rounded-xl bg-blue-600 text-white font-bold disabled:opacity-50 hover:bg-blue-700"
           >
-            {completing ? 'Sparar...' : 'Spara resa'}
+            {completing ? 'Sparar...' : calculatingRoute ? 'Beräknar...' : 'Spara resa'}
           </button>
         </div>
       </div>
