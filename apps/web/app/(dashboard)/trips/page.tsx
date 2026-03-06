@@ -2,9 +2,10 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { createBrowserClient } from '../../lib/supabase/client';
-import TripTable from '../../components/TripTable';
+import { createBrowserClient } from '../../../lib/supabase/client';
+import TripTable from '../../../components/TripTable';
 import type { TripFilter } from '@korjournal/shared';
+import type { TripRow } from '../../../components/TripTable';
 
 export default function TripsPage() {
   const supabase = createBrowserClient();
@@ -44,12 +45,18 @@ export default function TripsPage() {
 
   const { data: vehicles } = useQuery({
     queryKey: ['vehicles'],
-    queryFn: () => supabase.from('vehicles').select('id, registration_number').eq('is_active', true),
+    queryFn: async () => {
+      const { data } = await supabase.from('vehicles').select('id, registration_number').eq('is_active', true);
+      return data ?? [];
+    },
   });
 
   const { data: drivers } = useQuery({
     queryKey: ['drivers'],
-    queryFn: () => supabase.from('profiles').select('id, full_name'),
+    queryFn: async () => {
+      const { data } = await supabase.from('profiles').select('id, full_name');
+      return data ?? [];
+    },
   });
 
   const totalPages = Math.ceil((data?.count ?? 0) / pageSize);
@@ -90,7 +97,7 @@ export default function TripsPage() {
               onChange={(e) => setFilter({ ...filter, vehicleId: e.target.value || undefined })}
             >
               <option value="">Alla fordon</option>
-              {vehicles?.data?.map((v) => (
+              {vehicles?.map((v) => (
                 <option key={v.id} value={v.id}>{v.registration_number}</option>
               ))}
             </select>
@@ -103,7 +110,7 @@ export default function TripsPage() {
               onChange={(e) => setFilter({ ...filter, driverId: e.target.value || undefined })}
             >
               <option value="">Alla förare</option>
-              {drivers?.data?.map((d) => (
+              {drivers?.map((d) => (
                 <option key={d.id} value={d.id}>{d.full_name}</option>
               ))}
             </select>
@@ -137,7 +144,7 @@ export default function TripsPage() {
         <div className="text-center py-12 text-gray-500">Laddar resor...</div>
       ) : (
         <>
-          <TripTable trips={data?.data ?? []} />
+          <TripTable trips={(data?.data ?? []) as TripRow[]} />
 
           {/* Pagination */}
           {totalPages > 1 && (

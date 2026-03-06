@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { createBrowserClient } from '../../lib/supabase/client';
+import { createBrowserClient } from '../../../lib/supabase/client';
 
 export default function ExportPage() {
   const supabase = createBrowserClient();

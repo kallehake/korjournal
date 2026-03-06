@@ -50,8 +50,9 @@ function getCurrentPosition(): Promise<GeolocationPosition> {
       return;
     }
     navigator.geolocation.getCurrentPosition(resolve, reject, {
-      enableHighAccuracy: true,
-      timeout: 10000,
+      enableHighAccuracy: false,
+      timeout: 8000,
+      maximumAge: 60000,
     });
   });
 }
@@ -369,17 +370,12 @@ export default function DrivePage() {
         )}
 
         {/* Trip type */}
-        <div className="flex gap-2">
-          {(['business', 'private'] as const).map((t) => (
-            <button
-              key={t}
-              onClick={() => {/* Can't change type after start */}}
-              disabled
-              className="flex-1 py-3 rounded-xl border-2 border-gray-200 text-sm font-semibold text-gray-400 bg-gray-50"
-            >
-              {t === 'business' ? 'Tjänsteresa' : 'Privatresa'}
-            </button>
-          ))}
+        <div className={`rounded-xl border-2 py-3 text-center text-sm font-semibold ${
+          activeTrip?.tripType === 'business'
+            ? 'border-blue-600 bg-blue-50 text-blue-700'
+            : 'border-purple-600 bg-purple-50 text-purple-700'
+        }`}>
+          {activeTrip?.tripType === 'business' ? 'Tjänsteresa' : 'Privatresa'}
         </div>
 
         {/* End address */}

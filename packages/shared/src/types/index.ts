@@ -24,6 +24,8 @@ export type FuelType = Database['public']['Enums']['fuel_type'];
 export type UserRole = Database['public']['Enums']['user_role'];
 export type AlertType = Database['public']['Enums']['alert_type'];
 export type GeofenceType = Database['public']['Enums']['geofence_type'];
+export type IntegrationProvider = Database['public']['Enums']['integration_provider'];
+export type IntegrationStatus = Database['public']['Enums']['integration_status'];
 
 // App-specific types
 export interface TripWithRelations {

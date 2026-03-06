@@ -5,8 +5,10 @@
  */
 
 // Module-level connection state
-let _device: BluetoothDevice | null = null;
-let _char: BluetoothRemoteGATTCharacteristic | null = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let _device: any = null;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let _char: any = null;
 let _buffer = '';
 let _resolver: ((v: string) => void) | null = null;
 let _rejecter: ((e: Error) => void) | null = null;
@@ -15,7 +17,8 @@ const SERVICE_UUID = '0000ffe0-0000-1000-8000-00805f9b34fb';
 const CHAR_UUID = '0000ffe1-0000-1000-8000-00805f9b34fb';
 
 function onNotification(event: Event) {
-  const char = event.target as BluetoothRemoteGATTCharacteristic;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const char = event.target as any;
   if (!char.value) return;
   _buffer += new TextDecoder().decode(char.value);
 
@@ -74,7 +77,8 @@ export async function connect(): Promise<void> {
     );
   }
 
-  _device = await navigator.bluetooth.requestDevice({
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  _device = await (navigator as any).bluetooth.requestDevice({
     filters: [
       { namePrefix: 'iCar' },
       { namePrefix: 'Vgate' },

@@ -2,7 +2,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { useParams, useRouter } from 'next/navigation';
-import { createBrowserClient } from '../../../lib/supabase/client';
+import { createBrowserClient } from '../../../../lib/supabase/client';
 import { formatDate, formatTime, formatDistance, tripTypeLabel, tripStatusLabel } from '@korjournal/shared';
 
 export default function TripDetailPage() {

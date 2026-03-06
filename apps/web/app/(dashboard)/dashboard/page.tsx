@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useState } from "react";
 import {
   BarChart,
   Bar,
@@ -15,59 +15,89 @@ import {
   Legend,
 } from "recharts";
 import StatCard from "@/components/StatCard";
+import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
-// Mock data - replace with TanStack Query + Supabase calls
-const mockMonthlyData = [
-  { month: "Jan", resor: 42 },
-  { month: "Feb", resor: 38 },
-  { month: "Mar", resor: 55 },
-  { month: "Apr", resor: 48 },
-  { month: "Maj", resor: 62 },
-  { month: "Jun", resor: 51 },
-  { month: "Jul", resor: 28 },
-  { month: "Aug", resor: 45 },
-  { month: "Sep", resor: 58 },
-  { month: "Okt", resor: 64 },
-  { month: "Nov", resor: 53 },
-  { month: "Dec", resor: 40 },
-];
-
-const mockTripTypeData = [
-  { name: "Tjänsteresor", value: 412, color: "#2563eb" },
-  { name: "Privatresor", value: 172, color: "#f59e0b" },
-];
+const MONTHS = ["Jan","Feb","Mar","Apr","Maj","Jun","Jul","Aug","Sep","Okt","Nov","Dec"];
 
 export default function DashboardPage() {
-  const stats = useMemo(
-    () => ({
-      totalTrips: 584,
-      totalDistance: 48250,
-      businessTrips: 412,
-      privateTrips: 172,
-      activeVehicles: 12,
-      activeDrivers: 8,
-    }),
-    []
+  const supabase = createSupabaseBrowserClient();
+  const [stats, setStats] = useState({
+    totalTrips: 0,
+    totalDistance: 0,
+    businessTrips: 0,
+    privateTrips: 0,
+    activeVehicles: 0,
+  });
+  const [monthlyData, setMonthlyData] = useState(
+    MONTHS.map((month) => ({ month, resor: 0 }))
   );
+  const [recentTrips, setRecentTrips] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function load() {
+      const year = new Date().getFullYear();
+
+      const [tripsRes, vehiclesRes] = await Promise.all([
+        supabase
+          .from("trips")
+          .select("id, trip_type, distance_km, date, start_address, end_address, odometer_start, odometer_end, status, profiles(full_name), vehicles(registration_number)")
+          .eq("status", "completed")
+          .order("date", { ascending: false }),
+        supabase
+          .from("vehicles")
+          .select("id")
+          .eq("is_active", true),
+      ]);
+
+      const trips = tripsRes.data ?? [];
+      const vehicles = vehiclesRes.data ?? [];
+
+      const business = trips.filter((t) => t.trip_type === "business");
+      const priv = trips.filter((t) => t.trip_type === "private");
+      const totalDist = trips.reduce((s, t) => s + (t.distance_km ?? (t.odometer_end && t.odometer_start ? t.odometer_end - t.odometer_start : 0)), 0);
+
+      // Monthly breakdown for current year
+      const byMonth = MONTHS.map((month, i) => ({
+        month,
+        resor: trips.filter((t) => {
+          const d = new Date(t.date);
+          return d.getFullYear() === year && d.getMonth() === i;
+        }).length,
+      }));
+
+      setStats({
+        totalTrips: trips.length,
+        totalDistance: Math.round(totalDist),
+        businessTrips: business.length,
+        privateTrips: priv.length,
+        activeVehicles: vehicles.length,
+      });
+      setMonthlyData(byMonth);
+      setRecentTrips(trips.slice(0, 5));
+      setLoading(false);
+    }
+    load();
+  }, []);
+
+  const tripTypeData = [
+    { name: "Tjänsteresor", value: stats.businessTrips, color: "#2563eb" },
+    { name: "Privatresor", value: stats.privateTrips, color: "#f59e0b" },
+  ];
 
   return (
     <div className="space-y-8">
-      {/* Page header */}
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
-        <p className="mt-1 text-sm text-gray-500">
-          Översikt av alla resor och fordon
-        </p>
+        <p className="mt-1 text-sm text-gray-500">Översikt av alla resor och fordon</p>
       </div>
 
-      {/* Stat cards */}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
           title="Totalt antal resor"
-          value={stats.totalTrips}
-          subtitle="Denna period"
+          value={loading ? "–" : stats.totalTrips}
+          subtitle="Avslutade resor"
           color="blue"
-          trend={{ value: 12, label: "jmf förra månaden" }}
           icon={
             <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M9 6.75V15m6-6v8.25m.503 3.498 4.875-2.437c.381-.19.622-.58.622-1.006V4.82c0-.836-.88-1.38-1.628-1.006l-3.869 1.934c-.317.159-.69.159-1.006 0L9.503 3.252a1.125 1.125 0 0 0-1.006 0L3.622 5.689C3.24 5.88 3 6.27 3 6.695V19.18c0 .836.88 1.38 1.628 1.006l3.869-1.934c.317-.159.69-.159 1.006 0l4.994 2.497c.317.158.69.158 1.006 0Z" />
@@ -76,10 +106,9 @@ export default function DashboardPage() {
         />
         <StatCard
           title="Total distans"
-          value={`${stats.totalDistance.toLocaleString("sv-SE")} km`}
+          value={loading ? "–" : `${stats.totalDistance.toLocaleString("sv-SE")} km`}
           subtitle="Totalt körda kilometer"
           color="green"
-          trend={{ value: 8, label: "jmf förra månaden" }}
           icon={
             <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" d="M3.75 3v11.25A2.25 2.25 0 0 0 6 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0 1 18 16.5h-2.25m-7.5 0h7.5m-7.5 0-1 3m8.5-3 1 3m0 0 .5 1.5m-.5-1.5h-9.5m0 0-.5 1.5" />
@@ -88,8 +117,8 @@ export default function DashboardPage() {
         />
         <StatCard
           title="Tjänsteresor"
-          value={stats.businessTrips}
-          subtitle={`${Math.round((stats.businessTrips / stats.totalTrips) * 100)}% av alla resor`}
+          value={loading ? "–" : stats.businessTrips}
+          subtitle={stats.totalTrips > 0 ? `${Math.round((stats.businessTrips / stats.totalTrips) * 100)}% av alla resor` : "Inga resor än"}
           color="purple"
           icon={
             <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -99,8 +128,8 @@ export default function DashboardPage() {
         />
         <StatCard
           title="Aktiva fordon"
-          value={stats.activeVehicles}
-          subtitle={`${stats.activeDrivers} aktiva förare`}
+          value={loading ? "–" : stats.activeVehicles}
+          subtitle="Registrerade fordon"
           color="amber"
           icon={
             <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -110,138 +139,98 @@ export default function DashboardPage() {
         />
       </div>
 
-      {/* Charts */}
       <div className="grid gap-6 lg:grid-cols-3">
-        {/* Bar chart - Trips per month */}
         <div className="card lg:col-span-2">
-          <h2 className="mb-4 text-lg font-semibold text-gray-900">
-            Resor per månad
-          </h2>
+          <h2 className="mb-4 text-lg font-semibold text-gray-900">Resor per månad ({new Date().getFullYear()})</h2>
           <div className="h-80">
             <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={mockMonthlyData}>
+              <BarChart data={monthlyData}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis
-                  dataKey="month"
-                  tick={{ fontSize: 12, fill: "#64748b" }}
-                  axisLine={{ stroke: "#e2e8f0" }}
-                />
-                <YAxis
-                  tick={{ fontSize: 12, fill: "#64748b" }}
-                  axisLine={{ stroke: "#e2e8f0" }}
-                />
+                <XAxis dataKey="month" tick={{ fontSize: 12, fill: "#64748b" }} axisLine={{ stroke: "#e2e8f0" }} />
+                <YAxis tick={{ fontSize: 12, fill: "#64748b" }} axisLine={{ stroke: "#e2e8f0" }} allowDecimals={false} />
                 <Tooltip
-                  contentStyle={{
-                    borderRadius: "8px",
-                    border: "1px solid #e2e8f0",
-                    boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)",
-                  }}
+                  contentStyle={{ borderRadius: "8px", border: "1px solid #e2e8f0", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)" }}
                   formatter={(value: number) => [`${value} resor`, "Antal"]}
                 />
-                <Bar
-                  dataKey="resor"
-                  fill="#2563eb"
-                  radius={[4, 4, 0, 0]}
-                  maxBarSize={40}
-                />
+                <Bar dataKey="resor" fill="#2563eb" radius={[4, 4, 0, 0]} maxBarSize={40} />
               </BarChart>
             </ResponsiveContainer>
           </div>
         </div>
 
-        {/* Pie chart - Trip types */}
         <div className="card">
-          <h2 className="mb-4 text-lg font-semibold text-gray-900">
-            Fördelning restyp
-          </h2>
+          <h2 className="mb-4 text-lg font-semibold text-gray-900">Fördelning restyp</h2>
           <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie
-                  data={mockTripTypeData}
-                  cx="50%"
-                  cy="45%"
-                  innerRadius={60}
-                  outerRadius={90}
-                  paddingAngle={4}
-                  dataKey="value"
-                >
-                  {mockTripTypeData.map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={entry.color} />
-                  ))}
-                </Pie>
-                <Tooltip
-                  formatter={(value: number) => [`${value} resor`, "Antal"]}
-                  contentStyle={{
-                    borderRadius: "8px",
-                    border: "1px solid #e2e8f0",
-                  }}
-                />
-                <Legend
-                  verticalAlign="bottom"
-                  formatter={(value) => (
-                    <span className="text-sm text-gray-600">{value}</span>
-                  )}
-                />
-              </PieChart>
-            </ResponsiveContainer>
+            {stats.totalTrips === 0 ? (
+              <div className="flex h-full items-center justify-center text-gray-400 text-sm">Inga resor ännu</div>
+            ) : (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={tripTypeData} cx="50%" cy="45%" innerRadius={60} outerRadius={90} paddingAngle={4} dataKey="value">
+                    {tripTypeData.map((entry, index) => (
+                      <Cell key={`cell-${index}`} fill={entry.color} />
+                    ))}
+                  </Pie>
+                  <Tooltip
+                    formatter={(value: number) => [`${value} resor`, "Antal"]}
+                    contentStyle={{ borderRadius: "8px", border: "1px solid #e2e8f0" }}
+                  />
+                  <Legend verticalAlign="bottom" formatter={(value) => <span className="text-sm text-gray-600">{value}</span>} />
+                </PieChart>
+              </ResponsiveContainer>
+            )}
           </div>
         </div>
       </div>
 
-      {/* Recent trips */}
       <div className="card">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-gray-900">
-            Senaste resor
-          </h2>
-          <a
-            href="/trips"
-            className="text-sm font-medium text-primary-600 hover:text-primary-800"
-          >
-            Visa alla &rarr;
-          </a>
+          <h2 className="text-lg font-semibold text-gray-900">Senaste resor</h2>
+          <a href="/trips" className="text-sm font-medium text-primary-600 hover:text-primary-800">Visa alla &rarr;</a>
         </div>
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200">
-            <thead>
-              <tr className="table-header">
-                <th className="px-4 py-3">Datum</th>
-                <th className="px-4 py-3">Förare</th>
-                <th className="px-4 py-3">Fordon</th>
-                <th className="px-4 py-3">Sträcka</th>
-                <th className="px-4 py-3">Distans</th>
-                <th className="px-4 py-3">Typ</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-100">
-              {[
-                { date: "2026-02-13", driver: "Anna Svensson", vehicle: "ABC 123", from: "Stockholm", to: "Uppsala", km: 72, type: "business" },
-                { date: "2026-02-12", driver: "Erik Johansson", vehicle: "DEF 456", from: "Göteborg", to: "Borås", km: 65, type: "business" },
-                { date: "2026-02-12", driver: "Maria Lindberg", vehicle: "GHI 789", from: "Malmö", to: "Lund", km: 18, type: "private" },
-                { date: "2026-02-11", driver: "Anna Svensson", vehicle: "ABC 123", from: "Uppsala", to: "Stockholm", km: 72, type: "business" },
-                { date: "2026-02-11", driver: "Karl Nilsson", vehicle: "JKL 012", from: "Linköping", to: "Norrköping", km: 45, type: "business" },
-              ].map((trip, i) => (
-                <tr key={i} className="transition-colors hover:bg-gray-50">
-                  <td className="table-cell font-medium">{trip.date}</td>
-                  <td className="table-cell">{trip.driver}</td>
-                  <td className="table-cell font-mono text-xs">{trip.vehicle}</td>
-                  <td className="table-cell">
-                    <span className="text-gray-500">{trip.from}</span>
-                    <span className="mx-1.5 text-gray-300">&rarr;</span>
-                    <span>{trip.to}</span>
-                  </td>
-                  <td className="table-cell font-medium">{trip.km} km</td>
-                  <td className="table-cell">
-                    <span className={trip.type === "business" ? "badge-business" : "badge-private"}>
-                      {trip.type === "business" ? "Tjänst" : "Privat"}
-                    </span>
-                  </td>
+        {loading ? (
+          <div className="py-8 text-center text-sm text-gray-400">Laddar...</div>
+        ) : recentTrips.length === 0 ? (
+          <div className="py-8 text-center text-sm text-gray-400">Inga resor registrerade ännu</div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="min-w-full divide-y divide-gray-200">
+              <thead>
+                <tr className="table-header">
+                  <th className="px-4 py-3">Datum</th>
+                  <th className="px-4 py-3">Förare</th>
+                  <th className="px-4 py-3">Fordon</th>
+                  <th className="px-4 py-3">Från → Till</th>
+                  <th className="px-4 py-3">Distans</th>
+                  <th className="px-4 py-3">Typ</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {recentTrips.map((trip) => {
+                  const dist = trip.distance_km ?? (trip.odometer_end && trip.odometer_start ? trip.odometer_end - trip.odometer_start : null);
+                  return (
+                    <tr key={trip.id} className="transition-colors hover:bg-gray-50">
+                      <td className="table-cell font-medium">{trip.date}</td>
+                      <td className="table-cell">{(trip.profiles as any)?.full_name ?? "–"}</td>
+                      <td className="table-cell font-mono text-xs">{(trip.vehicles as any)?.registration_number ?? "–"}</td>
+                      <td className="table-cell">
+                        <span className="text-gray-500">{trip.start_address}</span>
+                        <span className="mx-1.5 text-gray-300">&rarr;</span>
+                        <span>{trip.end_address ?? "–"}</span>
+                      </td>
+                      <td className="table-cell font-medium">{dist != null ? `${Math.round(dist)} km` : "–"}</td>
+                      <td className="table-cell">
+                        <span className={trip.trip_type === "business" ? "badge-business" : "badge-private"}>
+                          {trip.trip_type === "business" ? "Tjänst" : "Privat"}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </div>
   );

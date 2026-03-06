@@ -57,74 +57,66 @@ export default function LoginPage() {
           </p>
         </div>
 
-        {/* Login Card */}
+        {/* Card */}
         <div className="card">
-          <form action={handleSubmit} className="space-y-5">
-            {error && (
-              <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-                {error}
-              </div>
-            )}
-
-            <div>
-              <label htmlFor="email" className="label">
-                E-postadress
-              </label>
-              <input
-                id="email"
-                name="email"
-                type="email"
-                autoComplete="email"
-                required
-                placeholder="namn@foretag.se"
-                className="input"
-              />
-            </div>
-
-            <div>
-              <label htmlFor="password" className="label">
-                Lösenord
-              </label>
-              <input
-                id="password"
-                name="password"
-                type="password"
-                autoComplete="current-password"
-                required
-                placeholder="Ange ditt lösenord"
-                className="input"
-              />
-            </div>
-
-            <button type="submit" disabled={loading} className="btn-primary w-full">
-              {loading ? (
-                <span className="flex items-center gap-2">
-                  <svg
-                    className="h-4 w-4 animate-spin"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                  >
-                    <circle
-                      className="opacity-25"
-                      cx="12"
-                      cy="12"
-                      r="10"
-                      stroke="currentColor"
-                      strokeWidth="4"
-                    />
-                    <path
-                      className="opacity-75"
-                      fill="currentColor"
-                      d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
-                    />
-                  </svg>
-                  Loggar in...
-                </span>
-              ) : (
-                "Logga in"
+          {mode === "login" ? (
+            <form action={handleSubmit} className="space-y-5">
+              {error && (
+                <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {error}
+                </div>
               )}
-            </button>
-          </form>
+              <div>
+                <label htmlFor="email" className="label">E-postadress</label>
+                <input id="email" name="email" type="email" autoComplete="email" required placeholder="namn@foretag.se" className="input" />
+              </div>
+              <div>
+                <label htmlFor="password" className="label">Lösenord</label>
+                <input id="password" name="password" type="password" autoComplete="current-password" required placeholder="Ange ditt lösenord" className="input" />
+              </div>
+              <button type="submit" disabled={loading} className="btn-primary w-full">
+                {loading ? (
+                  <span className="flex items-center gap-2">
+                    <svg className="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                    </svg>
+                    Loggar in...
+                  </span>
+                ) : "Logga in"}
+              </button>
+              <button type="button" onClick={() => { setMode("reset"); setError(null); }} className="w-full text-sm text-center text-primary-600 hover:underline">
+                Glömt lösenord?
+              </button>
+            </form>
+          ) : resetSent ? (
+            <div className="space-y-4 text-center">
+              <p className="text-green-700 font-semibold">E-post skickad!</p>
+              <p className="text-sm text-gray-600">Kolla din inkorg och klicka på länken för att välja nytt lösenord.</p>
+              <button onClick={() => { setMode("login"); setResetSent(false); }} className="text-sm text-primary-600 hover:underline">
+                Tillbaka till inloggning
+              </button>
+            </div>
+          ) : (
+            <form action={handleReset} className="space-y-5">
+              {error && (
+                <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+                  {error}
+                </div>
+              )}
+              <p className="text-sm text-gray-600">Ange din e-postadress så skickar vi en länk för att återställa lösenordet.</p>
+              <div>
+                <label htmlFor="reset-email" className="label">E-postadress</label>
+                <input id="reset-email" name="email" type="email" autoComplete="email" required placeholder="namn@foretag.se" className="input" />
+              </div>
+              <button type="submit" disabled={loading} className="btn-primary w-full">
+                {loading ? "Skickar..." : "Skicka återställningslänk"}
+              </button>
+              <button type="button" onClick={() => { setMode("login"); setError(null); }} className="w-full text-sm text-center text-gray-500 hover:underline">
+                Tillbaka till inloggning
+              </button>
+            </form>
+          )}
         </div>
 
         <p className="mt-6 text-center text-xs text-gray-400">
