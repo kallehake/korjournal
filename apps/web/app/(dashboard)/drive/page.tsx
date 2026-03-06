@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { createSupabaseBrowserClient } from '@/lib/supabase/client';
 import * as Obd2 from '@/lib/obd2-web';
+import type { Geofence } from '@korjournal/shared';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -62,6 +63,21 @@ async function calculateRouteDistanceKm(
   }
 }
 
+function haversineDistance(lat1: number, lng1: number, lat2: number, lng2: number): number {
+  const R = 6371000;
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLng = (lng2 - lng1) * Math.PI / 180;
+  const a = Math.sin(dLat / 2) ** 2 +
+    Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+  return R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+}
+
+function findGeofence(lat: number, lng: number, geofences: Geofence[]): Geofence | null {
+  return geofences.find(
+    (g) => g.is_active && haversineDistance(lat, lng, g.latitude, g.longitude) <= g.radius_meters
+  ) ?? null;
+}
+
 function getCurrentPosition(): Promise<GeolocationPosition> {
   return new Promise((resolve, reject) => {
     if (!navigator.geolocation) {
@@ -116,6 +132,8 @@ export default function DrivePage() {
   const [selectedCustomerId, setSelectedCustomerId] = useState('');
   const [selectedProjectId, setSelectedProjectId] = useState('');
   const [notes, setNotes] = useState('');
+  const [completionTripType, setCompletionTripType] = useState<'business' | 'private'>('business');
+  const [geofenceHint, setGeofenceHint] = useState<string | null>(null);
   const [completing, setCompleting] = useState(false);
   const [completeError, setCompleteError] = useState<string | null>(null);
   const [obd2EndStatus, setObd2EndStatus] = useState<'idle' | 'connecting' | 'reading' | 'error'>('idle');
@@ -155,6 +173,17 @@ export default function DrivePage() {
         .eq('is_active', true)
         .order('name');
       return data ?? [];
+    },
+  });
+
+  const { data: geofences } = useQuery({
+    queryKey: ['geofences-active'],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from('geofences')
+        .select('*')
+        .eq('is_active', true);
+      return (data ?? []) as Geofence[];
     },
   });
 
@@ -230,7 +259,6 @@ export default function DrivePage() {
       .then((pos) => {
         const { latitude: lat, longitude: lng } = pos.coords;
         setStartCoords({ lat, lng });
-        setStartAddress((prev) => prev || '');
         reverseGeocode(lat, lng).then((addr) => {
           setStartAddress((prev) => prev || addr);
         });
@@ -238,6 +266,18 @@ export default function DrivePage() {
       .catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [phase]);
+
+  // Auto-classify trip type based on start geofence
+  useEffect(() => {
+    if (!startCoords || !geofences?.length) return;
+    const zone = findGeofence(startCoords.lat, startCoords.lng, geofences);
+    if (!zone) return;
+    if (zone.auto_trip_type === 'business' || zone.auto_trip_type === 'private') {
+      setTripType(zone.auto_trip_type);
+    } else if (zone.type === 'home' || zone.type === 'office') {
+      setTripType('business');
+    }
+  }, [startCoords, geofences]);
 
   // ─── OBD2 ────────────────────────────────────────────────────────────────
 
@@ -328,6 +368,9 @@ export default function DrivePage() {
     setPhase('completing');
     setCalculatingRoute(true);
     setRouteDistanceKm(null);
+    setGeofenceHint(null);
+    // Default completion type to what was set at start
+    setCompletionTripType(activeTrip?.tripType ?? 'business');
 
     try {
       const pos = await getCurrentPosition();
@@ -335,6 +378,23 @@ export default function DrivePage() {
 
       // Get end address
       reverseGeocode(endLat, endLng).then(setEndAddress);
+
+      // Detect end geofence and auto-classify
+      if (geofences?.length) {
+        const endZone = findGeofence(endLat, endLng, geofences);
+        if (endZone) {
+          if (endZone.auto_trip_type === 'business' || endZone.auto_trip_type === 'private') {
+            setCompletionTripType(endZone.auto_trip_type);
+            setGeofenceHint(`Zon "${endZone.name}" → ${endZone.auto_trip_type === 'business' ? 'Tjänsteresa' : 'Privatresa'}`);
+          } else if (endZone.type === 'home') {
+            // Arriving home — keep start classification (business stays business)
+            setGeofenceHint(`Hemzon "${endZone.name}" detekterad`);
+          } else if (endZone.type === 'office' || endZone.type === 'customer') {
+            setCompletionTripType('business');
+            setGeofenceHint(`Zon "${endZone.name}" (${endZone.type === 'office' ? 'kontor' : 'kund'}) → Tjänsteresa`);
+          }
+        }
+      }
 
       // Calculate route distance if we have start coords
       if (activeTrip?.startLat != null && activeTrip?.startLng != null) {
@@ -352,7 +412,7 @@ export default function DrivePage() {
     } finally {
       setCalculatingRoute(false);
     }
-  }, [activeTrip]);
+  }, [activeTrip, geofences]);
 
   // ─── Complete trip ────────────────────────────────────────────────────────
 
@@ -368,6 +428,7 @@ export default function DrivePage() {
           end_time: new Date().toISOString(),
           end_address: endAddress || 'Okänd adress',
           odometer_end: odometerEnd ? parseInt(odometerEnd, 10) : null,
+          trip_type: completionTripType,
           purpose: purpose || null,
           visited_person: visitedPerson || null,
           customer_id: selectedCustomerId || null,
@@ -404,7 +465,7 @@ export default function DrivePage() {
     } finally {
       setCompleting(false);
     }
-  }, [activeTrip, odometerEnd, endAddress, purpose, visitedPerson, selectedCustomerId, notes, supabase]);
+  }, [activeTrip, odometerEnd, endAddress, purpose, visitedPerson, selectedCustomerId, selectedProjectId, notes, completionTripType, supabase]);
 
   // ─── Render ───────────────────────────────────────────────────────────────
 
@@ -452,12 +513,35 @@ export default function DrivePage() {
         )}
 
         {/* Trip type */}
-        <div className={`rounded-xl border-2 py-3 text-center text-sm font-semibold ${
-          activeTrip?.tripType === 'business'
-            ? 'border-blue-600 bg-blue-50 text-blue-700'
-            : 'border-purple-600 bg-purple-50 text-purple-700'
-        }`}>
-          {activeTrip?.tripType === 'business' ? 'Tjänsteresa' : 'Privatresa'}
+        <div>
+          <label className="block text-sm font-semibold text-gray-700 mb-2">Typ av resa</label>
+          {geofenceHint && (
+            <p className="text-xs text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-1.5 mb-2">
+              Automatisk: {geofenceHint}
+            </p>
+          )}
+          <div className="flex gap-2">
+            <button
+              onClick={() => setCompletionTripType('business')}
+              className={`flex-1 py-3 rounded-xl border-2 text-sm font-semibold transition-colors ${
+                completionTripType === 'business'
+                  ? 'border-blue-600 bg-blue-50 text-blue-700'
+                  : 'border-gray-200 text-gray-500'
+              }`}
+            >
+              Tjänsteresa
+            </button>
+            <button
+              onClick={() => setCompletionTripType('private')}
+              className={`flex-1 py-3 rounded-xl border-2 text-sm font-semibold transition-colors ${
+                completionTripType === 'private'
+                  ? 'border-purple-600 bg-purple-50 text-purple-700'
+                  : 'border-gray-200 text-gray-500'
+              }`}
+            >
+              Privatresa
+            </button>
+          </div>
         </div>
 
         {/* End address */}
