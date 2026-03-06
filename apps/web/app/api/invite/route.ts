@@ -47,7 +47,7 @@ export async function POST(request: Request) {
   const orgName = (profile as any).organizations?.name ?? '';
 
   const { data, error } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
-    redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/login/update-password`,
+    redirectTo: `${process.env.NEXT_PUBLIC_SITE_URL}/auth/callback?redirect_to=/login/update-password`,
     data: {
       organization_id: profile.organization_id,
       role: role ?? 'driver',
