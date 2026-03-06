@@ -1,0 +1,93 @@
+{
+  "expo": {
+    "name": "Körjournal",
+    "slug": "korjournal",
+    "version": "1.0.0",
+    "scheme": "korjournal",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#1a56db"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "se.korjournal.app",
+      "infoPlist": {
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Körjournal behöver tillgång till din plats för att spåra resor i bakgrunden.",
+        "NSLocationWhenInUseUsageDescription": "Körjournal behöver tillgång till din plats för att spåra resor.",
+        "NSLocationAlwaysUsageDescription": "Körjournal behöver tillgång till din plats för att spåra resor i bakgrunden.",
+        "NSBluetoothAlwaysUsageDescription": "Körjournal använder Bluetooth för att ansluta till din OBD2-adapter och läsa fordonsdata.",
+        "NSBluetoothPeripheralUsageDescription": "Körjournal använder Bluetooth för att ansluta till din OBD2-adapter.",
+        "UIBackgroundModes": [
+          "location",
+          "bluetooth-central"
+        ]
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#1a56db"
+      },
+      "package": "se.korjournal.app",
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION",
+        "BLUETOOTH",
+        "BLUETOOTH_ADMIN",
+        "BLUETOOTH_CONNECT",
+        "BLUETOOTH_SCAN",
+        "android.permission.ACCESS_COARSE_LOCATION",
+        "android.permission.ACCESS_FINE_LOCATION",
+        "android.permission.ACCESS_BACKGROUND_LOCATION",
+        "android.permission.FOREGROUND_SERVICE",
+        "android.permission.FOREGROUND_SERVICE_LOCATION"
+      ]
+    },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Körjournal behöver tillgång till din plats för att spåra resor i bakgrunden.",
+          "locationAlwaysPermission": "Körjournal behöver tillgång till din plats för att spåra resor i bakgrunden.",
+          "locationWhenInUsePermission": "Körjournal behöver tillgång till din plats för att spåra resor.",
+          "isIosBackgroundLocationEnabled": true,
+          "isAndroidBackgroundLocationEnabled": true,
+          "isAndroidForegroundServiceEnabled": true
+        }
+      ],
+      "expo-sqlite",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icon.png",
+          "color": "#2563eb"
+        }
+      ],
+      [
+        "react-native-ble-plx",
+        {
+          "isBackgroundEnabled": false,
+          "neverForLocation": false
+        }
+      ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "f0f7a715-8e97-4ffb-be8c-28cac5b0f09b"
+      }
+    }
+  }
+}

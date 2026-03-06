@@ -1,0 +1,15 @@
+node_modules/
+.next/
+dist/
+.turbo/
+.expo/
+*.tsbuildinfo
+.env
+.env.local
+.env.*.local
+ios/
+android/
+
+# Windows-artefakter
+nul
+gen_types_err.txt
