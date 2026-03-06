@@ -7,7 +7,7 @@ import { createBrowserClient } from '../../../lib/supabase/client';
 import type { Geofence, GeofenceType } from '@korjournal/shared';
 import { geofenceTypeLabels } from '@korjournal/shared';
 
-const MAP_CENTER: [number, number] = [59.3293, 18.0686];
+const MAP_CENTER: [number, number] = [57.6989, 12.4517]; // Hindås, Västra Götaland
 
 const typeColors: Record<GeofenceType, string> = {
   home: '#2563eb',
