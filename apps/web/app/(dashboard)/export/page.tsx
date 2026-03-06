@@ -33,51 +33,28 @@ export default function ExportPage() {
     },
   });
 
-  const handleExport = async (format: 'xlsx' | 'pdf') => {
+  const handleExport = async (format: 'pdf') => {
     setExporting(true);
     try {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!session) return;
-
       const params = new URLSearchParams({ date_from: dateFrom, date_to: dateTo });
       if (vehicleId) params.set('vehicle_id', vehicleId);
       if (driverId) params.set('driver_id', driverId);
       if (tripType) params.set('trip_type', tripType);
 
-      const functionName = format === 'xlsx' ? 'export-excel' : 'export-pdf';
-      const url = `${process.env.NEXT_PUBLIC_SUPABASE_URL}/functions/v1/${functionName}?${params}`;
-
-      const response = await fetch(url, {
-        headers: {
-          Authorization: `Bearer ${session.access_token}`,
-        },
-      });
+      const response = await fetch(`/api/report/pdf?${params}`);
 
       if (!response.ok) throw new Error('Export misslyckades');
 
-      const blob = await response.blob();
-
-      if (format === 'pdf') {
-        // Open HTML in new tab for printing
-        const html = await blob.text();
-        const win = window.open('', '_blank');
-        if (win) {
-          win.document.write(html);
-          win.document.close();
-        }
-      } else {
-        // Download CSV file
-        const downloadUrl = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = downloadUrl;
-        a.download = `korjournal_${dateFrom}_${dateTo}.csv`;
-        document.body.appendChild(a);
-        a.click();
-        a.remove();
-        window.URL.revokeObjectURL(downloadUrl);
+      const html = await response.text();
+      const win = window.open('', '_blank');
+      if (win) {
+        win.document.write(html);
+        win.document.close();
+        // Trigger print dialog automatically
+        win.addEventListener('load', () => win.print(), { once: true });
       }
-    } catch (error) {
-      alert('Kunde inte exportera. Försök igen.');
+    } catch {
+      alert('Kunde inte generera rapporten. Försök igen.');
     } finally {
       setExporting(false);
     }
@@ -158,20 +135,12 @@ export default function ExportPage() {
           <h3 className="text-sm font-medium text-gray-700 mb-3">Exportformat</h3>
           <div className="flex gap-3">
             <button
-              onClick={() => handleExport('xlsx')}
-              disabled={exporting}
-              className="flex-1 px-4 py-3 bg-green-600 text-white rounded-md text-sm hover:bg-green-700 disabled:opacity-50"
-            >
-              {exporting ? 'Exporterar...' : 'Excel (CSV)'}
-              <span className="block text-xs opacity-75 mt-1">Skatteverket-format, öppnas i Excel</span>
-            </button>
-            <button
               onClick={() => handleExport('pdf')}
               disabled={exporting}
               className="flex-1 px-4 py-3 bg-red-600 text-white rounded-md text-sm hover:bg-red-700 disabled:opacity-50"
             >
-              {exporting ? 'Exporterar...' : 'PDF'}
-              <span className="block text-xs opacity-75 mt-1">Utskriftsvänlig rapport</span>
+              {exporting ? 'Genererar...' : 'Skriv ut / Spara PDF'}
+              <span className="block text-xs opacity-75 mt-1">Öppnas i ny flik för utskrift</span>
             </button>
           </div>
         </div>
