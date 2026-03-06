@@ -5,6 +5,8 @@ import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
 type Tab = "org" | "profile" | "users";
 
+type InviteRole = "driver" | "admin";
+
 type OrgData = {
   id: string;
   name: string;
@@ -34,6 +36,12 @@ export default function SettingsPage() {
   const [saving, setSaving] = useState(false);
   const [savedMsg, setSavedMsg] = useState("");
   const [error, setError] = useState("");
+
+  // Invite state
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<InviteRole>("driver");
+  const [inviting, setInviting] = useState(false);
+  const [inviteMsg, setInviteMsg] = useState("");
 
   // Onboarding state
   const [setupName, setSetupName] = useState("");
@@ -117,6 +125,28 @@ export default function SettingsPage() {
       zip_code: (fd.get("zip_code") as string) || null,
       city: (fd.get("city") as string) || null,
     } : prev);
+  }
+
+  async function handleInvite(e: React.FormEvent) {
+    e.preventDefault();
+    if (!inviteEmail) return;
+    setInviting(true);
+    setInviteMsg("");
+    setError("");
+    const res = await fetch("/api/invite", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: inviteEmail, role: inviteRole }),
+    });
+    const json = await res.json();
+    setInviting(false);
+    if (!res.ok) {
+      setError(json.error ?? "Kunde inte skicka inbjudan");
+    } else {
+      setInviteEmail("");
+      setInviteMsg(`Inbjudan skickad till ${inviteEmail}`);
+      setTimeout(() => setInviteMsg(""), 5000);
+    }
   }
 
   async function saveProfile(e: React.FormEvent) {
@@ -333,12 +363,46 @@ export default function SettingsPage() {
               ))}
             </div>
           </div>
-          <div className="rounded-lg border border-dashed border-gray-300 p-6 text-center">
-            <p className="text-sm font-medium text-gray-500">Bjud in fler användare</p>
-            <p className="mt-1 text-xs text-gray-400">
-              Varje användare loggar in med sitt eget konto och kopplas till organisationen. Kommer snart.
-            </p>
-          </div>
+          {profile.role === "admin" && (
+            <div className="card">
+              <h2 className="font-semibold text-gray-900 mb-4">Bjud in ny användare</h2>
+              <form onSubmit={handleInvite} className="space-y-3">
+                {inviteMsg && (
+                  <div className="rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+                    {inviteMsg}
+                  </div>
+                )}
+                <div>
+                  <label className="label">E-postadress</label>
+                  <input
+                    className="input"
+                    type="email"
+                    required
+                    placeholder="forare@foretaget.se"
+                    value={inviteEmail}
+                    onChange={(e) => setInviteEmail(e.target.value)}
+                  />
+                </div>
+                <div>
+                  <label className="label">Roll</label>
+                  <select
+                    className="input"
+                    value={inviteRole}
+                    onChange={(e) => setInviteRole(e.target.value as InviteRole)}
+                  >
+                    <option value="driver">Förare</option>
+                    <option value="admin">Administratör</option>
+                  </select>
+                </div>
+                <button type="submit" disabled={inviting} className="btn-primary">
+                  {inviting ? "Skickar..." : "Skicka inbjudan"}
+                </button>
+                <p className="text-xs text-gray-400">
+                  Personen får ett e-postmeddelande med en länk för att skapa sitt konto och kopplas automatiskt till {org?.name}.
+                </p>
+              </form>
+            </div>
+          )}
         </div>
       )}
     </div>

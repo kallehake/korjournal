@@ -13,3 +13,5 @@ android/
 # Windows-artefakter
 nul
 gen_types_err.txt
+
+.vercel
