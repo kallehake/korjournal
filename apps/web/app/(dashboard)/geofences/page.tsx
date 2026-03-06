@@ -1,15 +1,13 @@
 'use client';
 
-import { useState, useRef, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
+import dynamic from 'next/dynamic';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { useLoadScript, GoogleMap, Marker, Circle, Autocomplete } from '@react-google-maps/api';
 import { createBrowserClient } from '../../../lib/supabase/client';
 import type { Geofence, GeofenceType } from '@korjournal/shared';
 import { geofenceTypeLabels } from '@korjournal/shared';
 
-const LIBRARIES: ('places')[] = ['places'];
-
-const MAP_CENTER = { lat: 59.3293, lng: 18.0686 }; // Stockholm default
+const MAP_CENTER: [number, number] = [59.3293, 18.0686];
 
 const typeColors: Record<GeofenceType, string> = {
   home: '#2563eb',
@@ -18,27 +16,20 @@ const typeColors: Record<GeofenceType, string> = {
   other: '#6b7280',
 };
 
-const typeBadge: Record<GeofenceType, string> = {
-  home: 'bg-blue-100 text-blue-800',
-  office: 'bg-purple-100 text-purple-800',
-  customer: 'bg-green-100 text-green-800',
-  other: 'bg-gray-100 text-gray-800',
-};
-
 interface PinLocation {
   lat: number;
   lng: number;
   address: string;
 }
 
+// Dynamically import the map component to avoid SSR issues with Leaflet
+const GeofenceMap = dynamic(() => import('./GeofenceMap'), { ssr: false, loading: () => (
+  <div className="h-full flex items-center justify-center bg-gray-100 text-gray-400">Laddar karta...</div>
+)});
+
 export default function GeofencesPage() {
   const supabase = createBrowserClient();
   const queryClient = useQueryClient();
-
-  const { isLoaded } = useLoadScript({
-    googleMapsApiKey: process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY!,
-    libraries: LIBRARIES,
-  });
 
   const [pin, setPin] = useState<PinLocation | null>(null);
   const [showForm, setShowForm] = useState(false);
@@ -50,9 +41,9 @@ export default function GeofencesPage() {
     auto_trip_type: '',
     is_active: true,
   });
-  const [mapCenter, setMapCenter] = useState(MAP_CENTER);
-  const autocompleteRef = useRef<google.maps.places.Autocomplete | null>(null);
-  const mapRef = useRef<google.maps.Map | null>(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searching, setSearching] = useState(false);
+  const [flyTo, setFlyTo] = useState<[number, number] | null>(null);
 
   const { data: geofences, isLoading } = useQuery({
     queryKey: ['geofences'],
@@ -63,37 +54,47 @@ export default function GeofencesPage() {
     },
   });
 
-  // Reverse geocode a lat/lng to an address
   async function reverseGeocode(lat: number, lng: number): Promise<string> {
     try {
-      const geocoder = new google.maps.Geocoder();
-      const result = await geocoder.geocode({ location: { lat, lng } });
-      return result.results[0]?.formatted_address ?? `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?lat=${lat}&lon=${lng}&format=json&accept-language=sv`,
+        { headers: { 'User-Agent': 'Korjournal/1.0' } }
+      );
+      const data = await res.json();
+      return data.display_name ?? `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
     } catch {
       return `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
     }
   }
 
-  const handleMapClick = useCallback(async (e: google.maps.MapMouseEvent) => {
-    if (!e.latLng) return;
-    const lat = e.latLng.lat();
-    const lng = e.latLng.lng();
+  const handleMapClick = useCallback(async (lat: number, lng: number) => {
     const address = await reverseGeocode(lat, lng);
     setPin({ lat, lng, address });
     setShowForm(true);
   }, []);
 
-  const onPlaceChanged = useCallback(async () => {
-    const place = autocompleteRef.current?.getPlace();
-    if (!place?.geometry?.location) return;
-    const lat = place.geometry.location.lat();
-    const lng = place.geometry.location.lng();
-    const address = place.formatted_address ?? place.name ?? `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
-    setPin({ lat, lng, address });
-    setMapCenter({ lat, lng });
-    mapRef.current?.panTo({ lat, lng });
-    setShowForm(true);
-  }, []);
+  async function handleSearch(e: React.FormEvent) {
+    e.preventDefault();
+    if (!searchQuery.trim()) return;
+    setSearching(true);
+    try {
+      const res = await fetch(
+        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(searchQuery)}&countrycodes=se&format=json&limit=1&accept-language=sv`,
+        { headers: { 'User-Agent': 'Korjournal/1.0' } }
+      );
+      const results = await res.json();
+      if (results[0]) {
+        const lat = parseFloat(results[0].lat);
+        const lng = parseFloat(results[0].lon);
+        const address = results[0].display_name;
+        setPin({ lat, lng, address });
+        setFlyTo([lat, lng]);
+        setShowForm(true);
+      }
+    } finally {
+      setSearching(false);
+    }
+  }
 
   const saveMutation = useMutation({
     mutationFn: async () => {
@@ -148,7 +149,7 @@ export default function GeofencesPage() {
 
   function startEdit(g: Geofence) {
     setPin({ lat: g.latitude, lng: g.longitude, address: `${g.latitude.toFixed(5)}, ${g.longitude.toFixed(5)}` });
-    setMapCenter({ lat: g.latitude, lng: g.longitude });
+    setFlyTo([g.latitude, g.longitude]);
     setEditingId(g.id);
     setForm({
       name: g.name,
@@ -158,7 +159,6 @@ export default function GeofencesPage() {
       is_active: g.is_active,
     });
     setShowForm(true);
-    mapRef.current?.panTo({ lat: g.latitude, lng: g.longitude });
   }
 
   return (
@@ -173,96 +173,38 @@ export default function GeofencesPage() {
       {/* Map */}
       <div className="bg-white rounded-xl shadow-sm border overflow-hidden">
         {/* Search bar */}
-        {isLoaded && (
-          <div className="p-3 border-b">
-            <Autocomplete
-              onLoad={(a) => { autocompleteRef.current = a; }}
-              onPlaceChanged={onPlaceChanged}
-              options={{ componentRestrictions: { country: 'se' } }}
+        <div className="p-3 border-b">
+          <form onSubmit={handleSearch} className="flex gap-2">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Sök adress eller plats..."
+              className="flex-1 rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+            <button
+              type="submit"
+              disabled={searching}
+              className="px-4 py-2 text-sm bg-blue-600 text-white rounded-lg hover:bg-blue-700 disabled:opacity-50"
             >
-              <input
-                type="text"
-                placeholder="Sök adress eller plats..."
-                className="w-full rounded-lg border border-gray-300 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-              />
-            </Autocomplete>
-          </div>
-        )}
+              {searching ? '...' : 'Sök'}
+            </button>
+          </form>
+        </div>
 
         {/* Map canvas */}
         <div className="h-[480px]">
-          {!isLoaded ? (
-            <div className="h-full flex items-center justify-center bg-gray-100 text-gray-400">Laddar karta...</div>
-          ) : (
-            <GoogleMap
-              mapContainerStyle={{ width: '100%', height: '100%' }}
-              center={mapCenter}
-              zoom={12}
-              onClick={handleMapClick}
-              onLoad={(map) => { mapRef.current = map; }}
-              options={{
-                streetViewControl: false,
-                mapTypeControl: false,
-                fullscreenControl: false,
-                zoomControlOptions: { position: google.maps.ControlPosition.RIGHT_CENTER },
-              }}
-            >
-              {/* Active pin (new/editing) */}
-              {pin && (
-                <Marker
-                  position={{ lat: pin.lat, lng: pin.lng }}
-                  animation={google.maps.Animation.DROP}
-                />
-              )}
-
-              {/* Existing geofences */}
-              {geofences?.map((g) => (
-                <div key={g.id}>
-                  <Marker
-                    position={{ lat: g.latitude, lng: g.longitude }}
-                    onClick={() => startEdit(g)}
-                    icon={{
-                      path: google.maps.SymbolPath.CIRCLE,
-                      scale: 8,
-                      fillColor: typeColors[g.type],
-                      fillOpacity: g.is_active ? 1 : 0.4,
-                      strokeColor: '#fff',
-                      strokeWeight: 2,
-                    }}
-                    title={g.name}
-                  />
-                  <Circle
-                    center={{ lat: g.latitude, lng: g.longitude }}
-                    radius={g.radius_meters}
-                    options={{
-                      fillColor: typeColors[g.type],
-                      fillOpacity: g.is_active ? 0.12 : 0.05,
-                      strokeColor: typeColors[g.type],
-                      strokeOpacity: g.is_active ? 0.5 : 0.2,
-                      strokeWeight: 1.5,
-                      clickable: false,
-                    }}
-                  />
-                </div>
-              ))}
-
-              {/* Preview circle for current pin */}
-              {pin && (
-                <Circle
-                  center={{ lat: pin.lat, lng: pin.lng }}
-                  radius={form.radius_meters}
-                  options={{
-                    fillColor: typeColors[form.type],
-                    fillOpacity: 0.18,
-                    strokeColor: typeColors[form.type],
-                    strokeOpacity: 0.8,
-                    strokeWeight: 2,
-                    clickable: false,
-                  }}
-                />
-              )}
-            </GoogleMap>
-          )}
+          <GeofenceMap
+            center={MAP_CENTER}
+            flyTo={flyTo}
+            pin={pin}
+            geofences={geofences ?? []}
+            formRadius={form.radius_meters}
+            formType={form.type}
+            typeColors={typeColors}
+            onMapClick={handleMapClick}
+            onGeofenceClick={startEdit}
+          />
         </div>
       </div>
 
