@@ -14,6 +14,8 @@ const TripMonitor = registerPlugin<TripMonitorPlugin>('TripMonitor');
 interface ActiveTrip {
   id: string;
   km?: number;
+  tripType?: 'business' | 'private';
+  zoneName?: string;
 }
 
 export default function DriveScreen() {
@@ -61,9 +63,11 @@ export default function DriveScreen() {
         setActiveTrip({ id: tripId });
         setCompletedTrip(null);
       });
-      const l3 = await TripMonitor.addListener('tripEnded', ({ tripId, km }) => {
+      const l3 = await TripMonitor.addListener('tripEnded', ({ tripId, km, tripType, zoneName }) => {
         setActiveTrip(null);
-        setCompletedTrip({ id: tripId, km });
+        setCompletedTrip({ id: tripId, km, tripType, zoneName });
+        if (tripType) setTripType(tripType);
+        if (zoneName) setPurpose(zoneName);
       });
       listeners = [l1, l2, l3];
     }
@@ -108,6 +112,11 @@ export default function DriveScreen() {
           <p className="label">Resa avslutad</p>
           {completedTrip.km !== undefined && (
             <p className="timer" style={{ fontSize: '2.5rem' }}>{completedTrip.km} km</p>
+          )}
+          {completedTrip.zoneName && (
+            <p className="sub" style={{ color: '#16a34a', fontWeight: 600 }}>
+              Zon: {completedTrip.zoneName}
+            </p>
           )}
         </div>
 
