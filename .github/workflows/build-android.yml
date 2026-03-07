@@ -5,6 +5,7 @@ on:
     branches: [master]
     paths:
       - 'apps/native/**'
+      - '.github/workflows/build-android.yml'
 
 jobs:
   build:
