@@ -9,6 +9,8 @@ dist/
 .env.*.local
 ios/
 android/
+# Native Capacitor-app (android-mappen behöver versionshanteras)
+!apps/native/android/
 
 # Windows-artefakter
 nul
