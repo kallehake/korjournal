@@ -106,35 +106,59 @@ class TripMonitorService : Service() {
 
     // ── GPS ──────────────────────────────────────────────────────────────────
 
-    @SuppressLint("MissingPermission")
     private fun setupGps() {
-        fusedLocation = LocationServices.getFusedLocationProviderClient(this)
-        val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 10_000).build()
-        fusedLocation?.requestLocationUpdates(req, object : LocationCallback() {
-            override fun onLocationResult(result: LocationResult) {
-                lastLocation = result.lastLocation
-            }
-        }, Looper.getMainLooper())
+        try {
+            fusedLocation = LocationServices.getFusedLocationProviderClient(this)
+            val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 10_000).build()
+            fusedLocation?.requestLocationUpdates(req, object : LocationCallback() {
+                override fun onLocationResult(result: LocationResult) {
+                    lastLocation = result.lastLocation
+                }
+            }, Looper.getMainLooper())
+        } catch (e: SecurityException) {
+            Log.e(TAG, "GPS-tillstånd saknas: ${e.message}")
+            updateNotification("GPS-tillstånd saknas — kontrollera inställningar")
+        }
     }
 
     // ── BLE scan ─────────────────────────────────────────────────────────────
 
-    @SuppressLint("MissingPermission")
     private suspend fun startBleScan() {
-        val adapter = (getSystemService(BLUETOOTH_SERVICE) as BluetoothManager).adapter
-        bleScanner = adapter.bluetoothLeScanner
-
-        updateNotification("Söker OBD2-adapter...")
-        val callback = object : ScanCallback() {
-            override fun onScanResult(callbackType: Int, result: ScanResult) {
-                val name = result.device.name?.lowercase() ?: return
-                if (OBD_NAME_PREFIXES.none { name.contains(it) }) return
-                bleScanner?.stopScan(this)
-                Log.d(TAG, "Hittade OBD2: ${result.device.name}")
-                scope.launch { connectGatt(result.device) }
+        try {
+            val adapter = (getSystemService(BLUETOOTH_SERVICE) as BluetoothManager).adapter
+            if (adapter == null || !adapter.isEnabled) {
+                updateNotification("Bluetooth avstängt — slå på för OBD2")
+                return
             }
+            bleScanner = adapter.bluetoothLeScanner
+
+            updateNotification("Söker OBD2-adapter...")
+            val callback = object : ScanCallback() {
+                override fun onScanResult(callbackType: Int, result: ScanResult) {
+                    try {
+                        val name = result.device.name?.lowercase() ?: return
+                        if (OBD_NAME_PREFIXES.none { name.contains(it) }) return
+                        bleScanner?.stopScan(this)
+                        Log.d(TAG, "Hittade OBD2: ${result.device.name}")
+                        scope.launch { connectGatt(result.device) }
+                    } catch (e: SecurityException) {
+                        Log.e(TAG, "BLE scan result fel: ${e.message}")
+                    }
+                }
+
+                override fun onScanFailed(errorCode: Int) {
+                    Log.e(TAG, "BLE-skanning misslyckades: $errorCode")
+                    updateNotification("BLE-skanning misslyckades (kod $errorCode)")
+                }
+            }
+            bleScanner?.startScan(callback)
+        } catch (e: SecurityException) {
+            Log.e(TAG, "Bluetooth-tillstånd saknas: ${e.message}")
+            updateNotification("Bluetooth-tillstånd saknas — kontrollera inställningar")
+        } catch (e: Exception) {
+            Log.e(TAG, "BLE-start fel: ${e.message}")
+            updateNotification("Kunde inte starta BLE-skanning")
         }
-        bleScanner?.startScan(callback)
     }
 
     // ── GATT connection ───────────────────────────────────────────────────────

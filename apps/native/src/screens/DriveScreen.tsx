@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
-import { registerPlugin } from '@capacitor/core';
+import { Capacitor, registerPlugin } from '@capacitor/core';
 import { supabase } from '../services/supabase';
+
+const isNative = Capacitor.isNativePlatform();
 
 interface TripMonitorPlugin {
   startService(): Promise<void>;
@@ -19,7 +21,9 @@ interface ActiveTrip {
 }
 
 export default function DriveScreen() {
-  const [status, setStatus] = useState('Startar bakgrundstjänst...');
+  const [status, setStatus] = useState(
+    isNative ? 'Startar bakgrundstjänst...' : 'Webbläsarläge — bakgrundstjänst ej tillgänglig'
+  );
   const [activeTrip, setActiveTrip] = useState<ActiveTrip | null>(null);
   const [completedTrip, setCompletedTrip] = useState<ActiveTrip | null>(null);
   const [purpose, setPurpose] = useState('');
@@ -27,35 +31,58 @@ export default function DriveScreen() {
   const [saving, setSaving] = useState(false);
   const [vehicles, setVehicles] = useState<{ id: string; registration_number: string }[]>([]);
   const [selectedVehicle, setSelectedVehicle] = useState('');
+  const [serviceError, setServiceError] = useState('');
 
   useEffect(() => {
     let listeners: { remove: () => void }[] = [];
 
     async function init() {
       // Load vehicles
-      const { data: veh } = await supabase.from('vehicles').select('id, registration_number').eq('is_active', true);
+      const { data: veh, error: vehError } = await supabase
+        .from('vehicles').select('id, registration_number').eq('is_active', true);
+
+      if (vehError) {
+        setStatus('Kunde inte ladda fordon: ' + vehError.message);
+        return;
+      }
       if (veh?.length) {
         setVehicles(veh);
         setSelectedVehicle(veh[0].id);
+      } else {
+        setStatus('Inga aktiva fordon — lägg till ett fordon i webbappen');
+        return;
+      }
 
-        // Get session and save for background service
-        const { data: { session } } = await supabase.auth.getSession();
-        if (session?.user) {
-          const { data: profile } = await supabase.from('profiles')
-            .select('id, organization_id').eq('id', session.user.id).single();
-          if (profile) {
-            await TripMonitor.saveSession({
-              accessToken: session.access_token,
-              driverId: profile.id,
-              orgId: profile.organization_id,
-              vehicleId: veh[0].id,
-            });
-          }
+      // Skip native calls when running in browser
+      if (!isNative) {
+        setStatus('Webbläsarläge — installera Android-appen för automatisk loggning');
+        return;
+      }
+
+      // Get session and save for background service
+      const { data: { session } } = await supabase.auth.getSession();
+      if (session?.user) {
+        const { data: profile } = await supabase.from('profiles')
+          .select('id, organization_id').eq('id', session.user.id).single();
+        if (profile) {
+          await TripMonitor.saveSession({
+            accessToken: session.access_token,
+            driverId: profile.id,
+            orgId: profile.organization_id,
+            vehicleId: veh[0].id,
+          });
         }
       }
 
-      // Start background service
-      await TripMonitor.startService();
+      // Start background service — plugin requests permissions if needed
+      try {
+        await TripMonitor.startService();
+      } catch (e: any) {
+        const msg = e?.message || 'Okänt fel';
+        setServiceError('Bakgrundstjänst misslyckades: ' + msg);
+        setStatus('Kontrollera tillstånd i Inställningar → Appar → Korjournal');
+        return;
+      }
 
       // Listen for events from background service
       const l1 = await TripMonitor.addListener('statusChanged', ({ status: s }) => setStatus(s));
@@ -72,7 +99,10 @@ export default function DriveScreen() {
       listeners = [l1, l2, l3];
     }
 
-    init().catch(console.error);
+    init().catch((e) => {
+      console.error('Init error:', e);
+      setStatus('Startfel: ' + (e?.message || 'okänt'));
+    });
     return () => listeners.forEach((l) => l.remove());
   }, []);
 
@@ -154,11 +184,19 @@ export default function DriveScreen() {
         <p className="sub">Resor startas och loggas automatiskt när bilen kör.</p>
         <p className="status">{status}</p>
 
+        {serviceError && (
+          <div className="error" style={{ width: '100%', textAlign: 'left' }}>
+            {serviceError}
+          </div>
+        )}
+
         {vehicles.length > 1 && (
           <div className="field" style={{ width: '100%', textAlign: 'left' }}>
-            <label>Aktiv fordon</label>
+            <label>Aktivt fordon</label>
             <select value={selectedVehicle} onChange={async (e) => {
-              setSelectedVehicle(e.target.value);
+              const vid = e.target.value;
+              setSelectedVehicle(vid);
+              if (!isNative) return;
               const { data: { session } } = await supabase.auth.getSession();
               if (session?.user) {
                 const { data: profile } = await supabase.from('profiles')
@@ -168,7 +206,7 @@ export default function DriveScreen() {
                     accessToken: session.access_token,
                     driverId: profile.id,
                     orgId: profile.organization_id,
-                    vehicleId: e.target.value,
+                    vehicleId: vid,
                   });
                 }
               }
