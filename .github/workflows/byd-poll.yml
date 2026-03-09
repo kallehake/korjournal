@@ -25,7 +25,6 @@ jobs:
         run: python scripts/byd_poll.py
 
       - name: Tesla — hämta kördata
-        if: ${{ secrets.TESLA_REFRESH_TOKEN != '' }}
         env:
           TESLA_REFRESH_TOKEN:       ${{ secrets.TESLA_REFRESH_TOKEN }}
           TESLA_VIN:                 ${{ secrets.TESLA_VIN }}
