@@ -119,8 +119,9 @@ export default function LoginPage() {
           )}
         </div>
 
-        <p className="mt-6 text-center text-xs text-gray-400">
-          Kontakta din administratör om du behöver ett konto.
+        <p className="mt-6 text-center text-sm text-gray-500">
+          Inget konto?{" "}
+          <a href="/signup" className="text-primary-600 hover:underline">Skapa konto gratis</a>
         </p>
       </div>
     </div>

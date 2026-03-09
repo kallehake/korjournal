@@ -1,4 +1,4 @@
-name: BYD Car Poller
+name: Korjournal — Fordonspollare
 
 on:
   schedule:
@@ -16,10 +16,19 @@ jobs:
       - name: Installera beroenden
         run: pip install -r scripts/requirements.txt
 
-      - name: Kör BYD-polling
+      - name: BYD — hämta kördata
         env:
           BYD_EMAIL:                 ${{ secrets.BYD_EMAIL }}
           BYD_PASSWORD:              ${{ secrets.BYD_PASSWORD }}
           SUPABASE_URL:              ${{ secrets.SUPABASE_URL }}
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python scripts/byd_poll.py
+
+      - name: Tesla — hämta kördata
+        if: ${{ secrets.TESLA_REFRESH_TOKEN != '' }}
+        env:
+          TESLA_REFRESH_TOKEN:       ${{ secrets.TESLA_REFRESH_TOKEN }}
+          TESLA_VIN:                 ${{ secrets.TESLA_VIN }}
+          SUPABASE_URL:              ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: python scripts/tesla_poll.py
