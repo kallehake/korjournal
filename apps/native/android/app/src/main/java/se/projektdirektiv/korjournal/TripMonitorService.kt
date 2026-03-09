@@ -35,33 +35,34 @@ class TripMonitorService : Service() {
         val OBD_WRITE: UUID   = UUID.fromString("0000fff2-0000-1000-8000-00805f9b34fb")
         val OBD_NOTIFY: UUID  = UUID.fromString("0000fff1-0000-1000-8000-00805f9b34fb")
         val CCCD: UUID        = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
-
-        val OBD_NAME_PREFIXES = listOf("vgate", "icar", "elm327", "obd", "veepeak")
+        val OBD_NAME_PREFIXES = listOf("vgate", "icar", "elm327", "obd", "veepeak", "vlink")
 
         // Supabase
         const val SUPABASE_URL = "https://wpwjeilkzyhwzoirltbi.supabase.co"
         const val SUPABASE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Indwd2plaWxrenlod3pvaXJsdGJpIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzEwMDM1OTYsImV4cCI6MjA4NjU3OTU5Nn0.M5ENENbHhUrSWbtnqhQytOiatKoXCpVJSi0u4x5qlAI"
 
         // Trip detection thresholds
-        const val SPEED_START_KMH = 5         // Speed above this starts trip
-        const val SPEED_STOP_MS = 5 * 60_000L // Stopped for 5 min → end trip
-        const val POLL_INTERVAL_MS = 4_000L   // Poll OBD2 every 4 seconds
+        const val SPEED_START_MS  = 1.4f        // ~5 km/h in m/s — GPS speed
+        const val SPEED_STOP_MS_DURATION = 5 * 60_000L  // Stopped for 5 min → end trip
+        const val GPS_INTERVAL_MS = 5_000L      // GPS update interval
+        const val BLE_RETRY_MS    = 30_000L     // Retry BLE scan every 30s if not connected
     }
 
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private val http = OkHttpClient()
 
-    // BLE
+    // BLE / OBD2 (optional — used for odometer only)
     private var bleScanner: BluetoothLeScanner? = null
     private var gatt: BluetoothGatt? = null
     private var writeChar: BluetoothGattCharacteristic? = null
-    private var pendingCommand: String? = null
     private val responseBuffer = StringBuilder()
     private val responseLock = Object()
+    private var obd2Connected = false
 
-    // GPS
+    // GPS (primary trip detection)
     private var fusedLocation: FusedLocationProviderClient? = null
     private var lastLocation: Location? = null
+    private var locationCallback: LocationCallback? = null
 
     // Trip state
     private var tripId: String? = null
@@ -69,8 +70,7 @@ class TripMonitorService : Service() {
     private var startLat = 0.0
     private var startLng = 0.0
     private var odometerStart = 0
-    private var stoppedSinceMs = 0L
-    private var status = "Söker OBD2..."
+    private var stoppedSince = 0L
 
     // Geofences cache
     data class Geofence(val name: String, val type: String, val lat: Double, val lng: Double, val radius: Double, val autoTripType: String?)
@@ -85,9 +85,13 @@ class TripMonitorService : Service() {
     override fun onCreate() {
         super.onCreate()
         createNotificationChannel()
-        startForeground(NOTIF_ID, buildNotification("Söker OBD2-adapter..."))
-        setupGps()
+        startForeground(NOTIF_ID, buildNotification("Startar..."))
         scope.launch { loadSession() }
+        setupGps()
+        scope.launch {
+            delay(2000) // Wait for GPS to initialise
+            startGpsMonitoring()
+        }
         scope.launch { startBleScan() }
     }
 
@@ -100,39 +104,79 @@ class TripMonitorService : Service() {
 
     override fun onDestroy() {
         scope.cancel()
+        fusedLocation?.removeLocationUpdates(locationCallback ?: return)
         gatt?.close()
         super.onDestroy()
     }
 
-    // ── GPS ──────────────────────────────────────────────────────────────────
+    // ── GPS setup ─────────────────────────────────────────────────────────────
 
     private fun setupGps() {
         try {
             fusedLocation = LocationServices.getFusedLocationProviderClient(this)
-            val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, 10_000).build()
-            fusedLocation?.requestLocationUpdates(req, object : LocationCallback() {
+            val req = LocationRequest.Builder(Priority.PRIORITY_HIGH_ACCURACY, GPS_INTERVAL_MS)
+                .setMinUpdateDistanceMeters(10f)
+                .build()
+            locationCallback = object : LocationCallback() {
                 override fun onLocationResult(result: LocationResult) {
                     lastLocation = result.lastLocation
                 }
-            }, Looper.getMainLooper())
+            }
+            fusedLocation?.requestLocationUpdates(req, locationCallback!!, Looper.getMainLooper())
+            Log.d(TAG, "GPS setup OK")
         } catch (e: SecurityException) {
             Log.e(TAG, "GPS-tillstånd saknas: ${e.message}")
-            updateNotification("GPS-tillstånd saknas — kontrollera inställningar")
+            updateNotification("GPS-tillstånd saknas — gå till Inställningar")
         }
     }
 
-    // ── BLE scan ─────────────────────────────────────────────────────────────
+    // ── GPS-based trip monitoring (primary) ───────────────────────────────────
+
+    private suspend fun startGpsMonitoring() {
+        updateNotification("Redo — väntar på rörelse")
+        Log.d(TAG, "GPS monitoring started")
+
+        while (true) {
+            delay(GPS_INTERVAL_MS)
+            val loc = lastLocation ?: continue
+            val speedMs = loc.speed  // m/s from GPS
+
+            if (speedMs >= SPEED_START_MS) {
+                // Moving
+                stoppedSince = 0L
+                if (tripId == null) {
+                    startTrip(loc)
+                } else {
+                    updateNotification("Resa pågår — ${(speedMs * 3.6).toInt()} km/h")
+                }
+            } else {
+                // Stopped
+                if (tripId != null) {
+                    if (stoppedSince == 0L) stoppedSince = System.currentTimeMillis()
+                    val stoppedFor = System.currentTimeMillis() - stoppedSince
+                    val minutesStopped = stoppedFor / 60_000
+                    if (stoppedFor >= SPEED_STOP_MS_DURATION) {
+                        endTrip(loc)
+                    } else {
+                        updateNotification("Resa pågår — stannat $minutesStopped min (avslutar vid 5 min)")
+                    }
+                }
+            }
+        }
+    }
+
+    // ── BLE scan (optional — for odometer) ───────────────────────────────────
 
     private suspend fun startBleScan() {
         try {
-            val adapter = (getSystemService(BLUETOOTH_SERVICE) as BluetoothManager).adapter
+            val btManager = getSystemService(BLUETOOTH_SERVICE) as BluetoothManager
+            val adapter = btManager.adapter
             if (adapter == null || !adapter.isEnabled) {
-                updateNotification("Bluetooth avstängt — slå på för OBD2")
+                Log.d(TAG, "Bluetooth inte aktiverat — kör utan OBD2")
                 return
             }
             bleScanner = adapter.bluetoothLeScanner
 
-            updateNotification("Söker OBD2-adapter...")
             val callback = object : ScanCallback() {
                 override fun onScanResult(callbackType: Int, result: ScanResult) {
                     try {
@@ -142,22 +186,35 @@ class TripMonitorService : Service() {
                         Log.d(TAG, "Hittade OBD2: ${result.device.name}")
                         scope.launch { connectGatt(result.device) }
                     } catch (e: SecurityException) {
-                        Log.e(TAG, "BLE scan result fel: ${e.message}")
+                        Log.e(TAG, "BLE scan result SecurityException: ${e.message}")
                     }
                 }
 
                 override fun onScanFailed(errorCode: Int) {
-                    Log.e(TAG, "BLE-skanning misslyckades: $errorCode")
-                    updateNotification("BLE-skanning misslyckades (kod $errorCode)")
+                    Log.e(TAG, "BLE-skanning misslyckades: kod $errorCode")
                 }
             }
             bleScanner?.startScan(callback)
+            Log.d(TAG, "BLE-skanning startad")
+
+            // Retry scan periodically if OBD2 not yet connected
+            while (true) {
+                delay(BLE_RETRY_MS)
+                if (!obd2Connected) {
+                    try {
+                        bleScanner?.stopScan(callback)
+                        bleScanner?.startScan(callback)
+                        Log.d(TAG, "BLE-skanning omstartad")
+                    } catch (e: SecurityException) {
+                        Log.e(TAG, "BLE retry SecurityException: ${e.message}")
+                        break
+                    }
+                }
+            }
         } catch (e: SecurityException) {
             Log.e(TAG, "Bluetooth-tillstånd saknas: ${e.message}")
-            updateNotification("Bluetooth-tillstånd saknas — kontrollera inställningar")
         } catch (e: Exception) {
             Log.e(TAG, "BLE-start fel: ${e.message}")
-            updateNotification("Kunde inte starta BLE-skanning")
         }
     }
 
@@ -165,9 +222,12 @@ class TripMonitorService : Service() {
 
     @SuppressLint("MissingPermission")
     private suspend fun connectGatt(device: BluetoothDevice) {
-        updateNotification("Ansluter till ${device.name}...")
-        withContext(Dispatchers.Main) {
-            gatt = device.connectGatt(this@TripMonitorService, false, gattCallback)
+        try {
+            withContext(Dispatchers.Main) {
+                gatt = device.connectGatt(this@TripMonitorService, false, gattCallback)
+            }
+        } catch (e: SecurityException) {
+            Log.e(TAG, "connectGatt SecurityException: ${e.message}")
         }
     }
 
@@ -175,35 +235,32 @@ class TripMonitorService : Service() {
     private val gattCallback = object : BluetoothGattCallback() {
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
             if (newState == BluetoothProfile.STATE_CONNECTED) {
+                obd2Connected = true
+                Log.d(TAG, "OBD2 ansluten")
                 g.discoverServices()
             } else if (newState == BluetoothProfile.STATE_DISCONNECTED) {
+                obd2Connected = false
                 gatt = null
                 writeChar = null
-                updateNotification("OBD2 frånkopplad — söker igen...")
-                if (tripId != null) scope.launch { endTrip() }
-                scope.launch { delay(5000); startBleScan() }
+                Log.d(TAG, "OBD2 frånkopplad")
+                scope.launch { delay(10_000); startBleScan() }
             }
         }
 
         override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
-            val service = g.getService(OBD_SERVICE) ?: run {
-                Log.w(TAG, "OBD-tjänst hittades inte"); return
-            }
+            val service = g.getService(OBD_SERVICE) ?: return
             writeChar = service.getCharacteristic(OBD_WRITE)
-
-            // Enable notifications
             val notifyChar = service.getCharacteristic(OBD_NOTIFY)
-            g.setCharacteristicNotification(notifyChar, true)
-            val desc = notifyChar.getDescriptor(CCCD)
-            desc?.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
-            g.writeDescriptor(desc)
-
-            scope.launch {
-                delay(500)
-                initElm327()
-                updateNotification("OBD2 ansluten ✓")
-                startMonitoring()
+            try {
+                g.setCharacteristicNotification(notifyChar, true)
+                val desc = notifyChar.getDescriptor(CCCD)
+                desc?.value = BluetoothGattDescriptor.ENABLE_NOTIFICATION_VALUE
+                g.writeDescriptor(desc)
+            } catch (e: SecurityException) {
+                Log.e(TAG, "GATT setup SecurityException: ${e.message}")
             }
+            scope.launch { delay(500); initElm327() }
+            Log.d(TAG, "OBD2 tjänster hittade — klar för mätarläsning")
         }
 
         @Deprecated("Deprecated in Java")
@@ -222,9 +279,14 @@ class TripMonitorService : Service() {
     private suspend fun sendCmd(cmd: String): String {
         val char = writeChar ?: return ""
         synchronized(responseLock) { responseBuffer.clear() }
-        withContext(Dispatchers.Main) {
-            char.value = (cmd + "\r").toByteArray()
-            gatt?.writeCharacteristic(char)
+        try {
+            withContext(Dispatchers.Main) {
+                char.value = (cmd + "\r").toByteArray()
+                gatt?.writeCharacteristic(char)
+            }
+        } catch (e: SecurityException) {
+            Log.e(TAG, "sendCmd SecurityException: ${e.message}")
+            return ""
         }
         return withContext(Dispatchers.IO) {
             synchronized(responseLock) {
@@ -241,18 +303,8 @@ class TripMonitorService : Service() {
         sendCmd("ATSP0")
     }
 
-    private fun parseHex(response: String, pid: String): Int? {
-        val parts = response.replace(Regex("[\\r\\n>]"), " ").trim().split(Regex("\\s+"))
-        val idx = parts.indexOfFirst { it.uppercase() == pid.uppercase() }
-        return if (idx >= 0 && parts.size > idx + 1) parts[idx + 1].toIntOrNull(16) else null
-    }
-
-    private suspend fun readSpeedKmh(): Int? {
-        val raw = sendCmd("010D")
-        return parseHex(raw, "0D")
-    }
-
     private suspend fun readOdometer(): Int? {
+        if (!obd2Connected || writeChar == null) return null
         val raw = sendCmd("01A6")
         val parts = raw.replace(Regex("[\\r\\n>]"), " ").trim().split(Regex("\\s+"))
         val idx = parts.indexOfFirst { it.uppercase() == "A6" }
@@ -262,45 +314,20 @@ class TripMonitorService : Service() {
         } else null
     }
 
-    private suspend fun readSoc(): Int? {
-        val raw = sendCmd("015B")
-        return parseHex(raw, "5B")?.let { (it * 100) / 255 }
-    }
-
-    // ── Trip monitoring loop ──────────────────────────────────────────────────
-
-    private suspend fun startMonitoring() {
-        stoppedSinceMs = 0L
-        while (gatt != null) {
-            val speed = readSpeedKmh()
-            val moving = (speed ?: 0) >= SPEED_START_KMH
-
-            if (moving) {
-                stoppedSinceMs = 0L
-                if (tripId == null) startTrip()
-            } else {
-                if (tripId != null) {
-                    if (stoppedSinceMs == 0L) stoppedSinceMs = System.currentTimeMillis()
-                    val stoppedFor = System.currentTimeMillis() - stoppedSinceMs
-                    if (stoppedFor >= SPEED_STOP_MS) endTrip()
-                    else updateNotification("Resa pågår — stannat ${stoppedFor / 60000} min")
-                }
-            }
-            delay(POLL_INTERVAL_MS)
-        }
-    }
-
     // ── Trip start/end ────────────────────────────────────────────────────────
 
-    private suspend fun startTrip() {
-        if (accessToken == null || vehicleId == null) return
-        val loc = lastLocation ?: return
+    private suspend fun startTrip(loc: Location) {
+        if (accessToken == null || vehicleId == null) {
+            Log.w(TAG, "startTrip: session saknas")
+            return
+        }
 
-        val odometer = readOdometer() ?: 0
-        odometerStart = odometer
         startLat = loc.latitude
         startLng = loc.longitude
         tripStart = System.currentTimeMillis()
+
+        // Try OBD2 odometer, fall back to 0
+        odometerStart = readOdometer() ?: 0
 
         val addr = reverseGeocode(startLat, startLng)
         val now = isoNow()
@@ -312,43 +339,55 @@ class TripMonitorService : Service() {
             put("date", now.substring(0, 10))
             put("start_time", now)
             put("start_address", addr)
-            put("odometer_start", odometer)
+            put("odometer_start", odometerStart)
             put("trip_type", "business")
             put("status", "active")
         }
 
         val id = supabaseInsert("trips", body)
-        tripId = id
-        updateNotification("Resa startad — $addr")
-        Log.d(TAG, "Trip started: $id")
+        if (id != null) {
+            tripId = id
+            val obd2Status = if (obd2Connected) " (OBD2 ✓)" else " (GPS)"
+            updateNotification("Resa startad — $addr$obd2Status")
+            TripMonitorPlugin.notifyTripStarted(id)
+            Log.d(TAG, "Trip started: $id addr=$addr obd2=$obd2Connected")
+        } else {
+            Log.e(TAG, "startTrip: supabaseInsert returnerade null")
+            updateNotification("Fel: kunde inte spara resa — kontrollera inloggning")
+        }
     }
 
-    private suspend fun endTrip() {
+    private suspend fun endTrip(loc: Location) {
         val id = tripId ?: return
         tripId = null
-        stoppedSinceMs = 0L
+        stoppedSince = 0L
 
-        val loc = lastLocation
-        val endLat = loc?.latitude ?: startLat
-        val endLng = loc?.longitude ?: startLng
+        val endLat = loc.latitude
+        val endLng = loc.longitude
         val endAddr = reverseGeocode(endLat, endLng)
-        val distKm = calcRouteKm(startLat, startLng, endLat, endLng) ?: 0
-        val endOdometer = odometerStart + distKm
 
-        // Geofence-detektering vid destination
+        // Try OBD2 odometer, fall back to OSRM routing distance
+        val endOdometer: Int
+        val distKm: Int
+        val odomEnd = readOdometer()
+        if (odomEnd != null && odometerStart > 0 && odomEnd > odometerStart) {
+            distKm = odomEnd - odometerStart
+            endOdometer = odomEnd
+        } else {
+            distKm = calcRouteKm(startLat, startLng, endLat, endLng) ?: 0
+            endOdometer = odometerStart + distKm
+        }
+
+        // Geofence auto-classification
         val startZone = findGeofence(startLat, startLng)
         val endZone   = findGeofence(endLat, endLng)
-
         val autoTripType = when {
-            endZone?.autoTripType != null              -> endZone.autoTripType
-            endZone?.type in listOf("office","customer") -> "business"
-            startZone?.type == "home"                  -> "business"
-            else                                       -> "business" // default
+            endZone?.autoTripType != null                    -> endZone.autoTripType
+            endZone?.type in listOf("office", "customer")   -> "business"
+            startZone?.type == "home"                        -> "business"
+            else                                             -> "business"
         }
-        val geofenceHint = when {
-            endZone != null -> endZone.name
-            else -> null
-        }
+        val zoneName = endZone?.name
 
         val body = JSONObject().apply {
             put("end_time", isoNow())
@@ -363,10 +402,11 @@ class TripMonitorService : Service() {
             supabasePatch("vehicles", it, JSONObject().put("current_odometer", endOdometer))
         }
 
-        updateNotification("Resa sparad — $distKm km")
+        val obd2Status = if (obd2Connected) " (OBD2 ✓)" else " (GPS)"
+        updateNotification("Resa sparad — $distKm km$obd2Status")
         showTripDoneNotification(id, endAddr, distKm)
-        TripMonitorPlugin.notifyTripEnded(id, distKm, autoTripType ?: "business", geofenceHint)
-        Log.d(TAG, "Trip ended: $id, $distKm km, zone: ${endZone?.name}")
+        TripMonitorPlugin.notifyTripEnded(id, distKm, autoTripType ?: "business", zoneName)
+        Log.d(TAG, "Trip ended: $id $distKm km zone=${zoneName} obd2=$obd2Connected")
     }
 
     // ── Supabase HTTP ─────────────────────────────────────────────────────────
@@ -389,7 +429,12 @@ class TripMonitorService : Service() {
                 .build()
             try {
                 val resp = http.newCall(req).execute()
-                val arr = org.json.JSONArray(resp.body?.string() ?: "[]")
+                val text = resp.body?.string() ?: "[]"
+                if (!resp.isSuccessful) {
+                    Log.e(TAG, "Insert HTTP ${resp.code}: $text")
+                    return@withContext null
+                }
+                val arr = JSONArray(text)
                 if (arr.length() > 0) arr.getJSONObject(0).optString("id") else null
             } catch (e: IOException) {
                 Log.e(TAG, "Insert failed: ${e.message}"); null
@@ -404,8 +449,10 @@ class TripMonitorService : Service() {
                 .headers(supabaseHeaders())
                 .patch(body.toString().toRequestBody(JSON_TYPE))
                 .build()
-            try { http.newCall(req).execute() }
-            catch (e: IOException) { Log.e(TAG, "Patch failed: ${e.message}") }
+            try {
+                val resp = http.newCall(req).execute()
+                if (!resp.isSuccessful) Log.e(TAG, "Patch HTTP ${resp.code}: ${resp.body?.string()}")
+            } catch (e: IOException) { Log.e(TAG, "Patch failed: ${e.message}") }
         }
     }
 
@@ -415,6 +462,7 @@ class TripMonitorService : Service() {
         driverId    = prefs.getString("driver_id", null)
         orgId       = prefs.getString("org_id", null)
         vehicleId   = prefs.getString("vehicle_id", null)
+        Log.d(TAG, "Session laddad: driver=$driverId vehicle=$vehicleId token=${if (accessToken != null) "OK" else "SAKNAS"}")
         loadGeofences()
     }
 
@@ -438,9 +486,9 @@ class TripMonitorService : Service() {
                         autoTripType = o.optString("auto_trip_type").takeIf { it.isNotEmpty() && it != "null" }
                     )
                 }
-                Log.d(TAG, "Loaded ${geofences.size} geofences")
+                Log.d(TAG, "Laddade ${geofences.size} geofences")
             } catch (e: Exception) {
-                Log.e(TAG, "Failed to load geofences: ${e.message}")
+                Log.e(TAG, "loadGeofences fel: ${e.message}")
             }
         }
     }
@@ -471,8 +519,8 @@ class TripMonitorService : Service() {
                 val road = addr?.optString("road", "") ?: ""
                 val num  = addr?.optString("house_number", "") ?: ""
                 val city = addr?.optString("city", "") ?: addr?.optString("town", "") ?: addr?.optString("village", "") ?: ""
-                listOf(if (num.isNotEmpty()) "$road $num" else road, city).filter { it.isNotEmpty() }.joinToString(", ")
-                    .ifEmpty { "$lat,$lng" }
+                listOf(if (num.isNotEmpty()) "$road $num" else road, city)
+                    .filter { it.isNotEmpty() }.joinToString(", ").ifEmpty { "$lat,$lng" }
             } catch (e: Exception) { "$lat,$lng" }
         }
     }
@@ -481,8 +529,7 @@ class TripMonitorService : Service() {
         return withContext(Dispatchers.IO) {
             try {
                 val url = "https://router.project-osrm.org/route/v1/driving/$lng1,$lat1;$lng2,$lat2?overview=false"
-                val req = Request.Builder().url(url).build()
-                val body = http.newCall(req).execute().body?.string() ?: return@withContext null
+                val body = http.newCall(Request.Builder().url(url).build()).execute().body?.string() ?: return@withContext null
                 val json = JSONObject(body)
                 if (json.optString("code") == "Ok") {
                     val dist = json.getJSONArray("routes").getJSONObject(0).getDouble("distance")
@@ -521,9 +568,7 @@ class TripMonitorService : Service() {
     }
 
     private fun updateNotification(text: String) {
-        status = text
-        getSystemService(NotificationManager::class.java)
-            .notify(NOTIF_ID, buildNotification(text))
+        getSystemService(NotificationManager::class.java).notify(NOTIF_ID, buildNotification(text))
         TripMonitorPlugin.notifyStatus(text)
     }
 
@@ -540,8 +585,6 @@ class TripMonitorService : Service() {
             .build()
         getSystemService(NotificationManager::class.java).notify(2, notif)
     }
-
-    // ── Helpers ───────────────────────────────────────────────────────────────
 
     private fun isoNow(): String =
         SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply {
