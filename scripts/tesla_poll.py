@@ -146,9 +146,10 @@ def poll():
                 "vehicle_id":      vehicle_id,
                 "driver_id":       driver_id,
                 "start_time":      gps_ts.isoformat(),
+                "start_address":   f"{lat:.4f}, {lon:.4f}",  # NOT NULL
                 "start_lat":       lat,
-                "start_lon":       lon,
-                "odometer_start":  round(odometer, 1),
+                "start_lng":       lon,
+                "odometer_start":  round(odometer),           # INTEGER
                 "trip_type":       "business",
             }).execute()
             active_trip_id = trip.data[0]["id"]
@@ -159,7 +160,7 @@ def poll():
                 "timestamp": gps_ts.isoformat(),
                 "latitude":  lat,
                 "longitude": lon,
-                "speed_kmh": round(speed_kmh, 1),
+                "speed":     round(speed_kmh / 3.6, 2),       # km/h → m/s
             }).execute()
             print(f"GPS-punkt sparad | Resa: {active_trip_id}")
     else:
@@ -167,11 +168,11 @@ def poll():
             database.table("trips").update({
                 "end_time":     gps_ts.isoformat(),
                 "end_lat":      lat,
-                "end_lon":      lon,
-                "odometer_end": round(odometer, 1),
+                "end_lng":      lon,
+                "odometer_end": round(odometer),               # INTEGER
             }).eq("id", active_trip_id).execute()
             km = odometer - (active_trip.get("odometer_start") or odometer)
-            print(f"Resa avslutad: {active_trip_id} | Distans: {km:.1f} km")
+            print(f"Resa avslutad: {active_trip_id} | Distans: {km:.0f} km")
         else:
             print("Bilen är still, ingen aktiv resa.")
 
