@@ -1,14 +1,27 @@
 'use client';
 
-import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, useRouter } from 'next/navigation';
 import { createBrowserClient } from '../../../../lib/supabase/client';
 import { formatDate, formatTime, formatDistance, tripTypeLabel, tripStatusLabel } from '@korjournal/shared';
+import TripMap from '../../../../components/TripMap';
 
 export default function TripDetailPage() {
   const { id } = useParams<{ id: string }>();
   const router = useRouter();
   const supabase = createBrowserClient();
+  const queryClient = useQueryClient();
+
+  const [editing, setEditing] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [form, setForm] = useState({
+    trip_type: 'business',
+    purpose: '',
+    visited_person: '',
+    notes: '',
+    customer_id: '',
+  });
 
   const { data: trip, isLoading } = useQuery({
     queryKey: ['trip', id],
@@ -28,6 +41,14 @@ export default function TripDetailPage() {
     },
   });
 
+  const { data: customers } = useQuery({
+    queryKey: ['customers'],
+    queryFn: async () => {
+      const { data } = await supabase.from('customers').select('id, name').order('name');
+      return data ?? [];
+    },
+  });
+
   const { data: gpsPoints } = useQuery({
     queryKey: ['gps_points', id],
     queryFn: async () => {
@@ -40,6 +61,38 @@ export default function TripDetailPage() {
     },
     enabled: !!id,
   });
+
+  function startEdit() {
+    if (!trip) return;
+    setForm({
+      trip_type: trip.trip_type ?? 'business',
+      purpose: trip.purpose ?? '',
+      visited_person: trip.visited_person ?? '',
+      notes: trip.notes ?? '',
+      customer_id: (trip.customer as any)?.id ?? '',
+    });
+    setEditing(true);
+  }
+
+  async function save() {
+    setSaving(true);
+    const { error } = await supabase
+      .from('trips')
+      .update({
+        trip_type: form.trip_type,
+        purpose: form.purpose || null,
+        visited_person: form.visited_person || null,
+        notes: form.notes || null,
+        customer_id: form.customer_id || null,
+      })
+      .eq('id', id as string);
+
+    setSaving(false);
+    if (!error) {
+      setEditing(false);
+      queryClient.invalidateQueries({ queryKey: ['trip', id] });
+    }
+  }
 
   if (isLoading) {
     return <div className="text-center py-12 text-gray-500">Laddar resa...</div>;
@@ -59,19 +112,16 @@ export default function TripDetailPage() {
   return (
     <div>
       <div className="flex items-center gap-4 mb-6">
-        <button
-          onClick={() => router.back()}
-          className="text-sm text-blue-600 hover:text-blue-800"
-        >
+        <button onClick={() => router.back()} className="text-sm text-blue-600 hover:text-blue-800">
           &larr; Tillbaka
         </button>
         <h1 className="text-2xl font-bold text-gray-900">Resdetaljer</h1>
         <span className={`ml-auto px-3 py-1 rounded-full text-xs font-medium ${
-          trip.trip_type === 'business'
+          (editing ? form.trip_type : trip.trip_type) === 'business'
             ? 'bg-blue-100 text-blue-700'
             : 'bg-purple-100 text-purple-700'
         }`}>
-          {tripTypeLabel(trip.trip_type)}
+          {tripTypeLabel(editing ? form.trip_type : trip.trip_type)}
         </span>
         <span className={`px-3 py-1 rounded-full text-xs font-medium ${
           trip.status === 'completed'
@@ -82,6 +132,30 @@ export default function TripDetailPage() {
         }`}>
           {tripStatusLabel(trip.status)}
         </span>
+        {!editing ? (
+          <button
+            onClick={startEdit}
+            className="px-4 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700"
+          >
+            Redigera
+          </button>
+        ) : (
+          <div className="flex gap-2">
+            <button
+              onClick={() => setEditing(false)}
+              className="px-4 py-1.5 bg-gray-100 text-gray-700 text-sm rounded-lg hover:bg-gray-200"
+            >
+              Avbryt
+            </button>
+            <button
+              onClick={save}
+              disabled={saving}
+              className="px-4 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50"
+            >
+              {saving ? 'Sparar...' : 'Spara'}
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -93,9 +167,56 @@ export default function TripDetailPage() {
           <InfoRow label="Sluttid" value={trip.end_time ? formatTime(trip.end_time) : null} />
           <InfoRow label="Startadress" value={trip.start_address} />
           <InfoRow label="Slutadress" value={trip.end_address} />
-          <InfoRow label="Ändamål" value={trip.purpose} />
-          <InfoRow label="Besökt person" value={trip.visited_person} />
-          <InfoRow label="Anteckningar" value={trip.notes} />
+
+          {editing ? (
+            <>
+              <div className="py-3 border-b border-gray-100">
+                <label className="block text-sm text-gray-500 mb-1">Restyp</label>
+                <select
+                  value={form.trip_type}
+                  onChange={e => setForm(f => ({ ...f, trip_type: e.target.value }))}
+                  className="w-full text-sm border border-gray-300 rounded-md px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="business">Tjänsteresa</option>
+                  <option value="private">Privatresa</option>
+                </select>
+              </div>
+              <div className="py-3 border-b border-gray-100">
+                <label className="block text-sm text-gray-500 mb-1">Ändamål</label>
+                <input
+                  type="text"
+                  value={form.purpose}
+                  onChange={e => setForm(f => ({ ...f, purpose: e.target.value }))}
+                  placeholder="T.ex. kundbesök, möte..."
+                  className="w-full text-sm border border-gray-300 rounded-md px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div className="py-3 border-b border-gray-100">
+                <label className="block text-sm text-gray-500 mb-1">Besökt person</label>
+                <input
+                  type="text"
+                  value={form.visited_person}
+                  onChange={e => setForm(f => ({ ...f, visited_person: e.target.value }))}
+                  className="w-full text-sm border border-gray-300 rounded-md px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div className="py-3">
+                <label className="block text-sm text-gray-500 mb-1">Anteckningar</label>
+                <textarea
+                  value={form.notes}
+                  onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
+                  rows={3}
+                  className="w-full text-sm border border-gray-300 rounded-md px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </>
+          ) : (
+            <>
+              <InfoRow label="Ändamål" value={trip.purpose} />
+              <InfoRow label="Besökt person" value={trip.visited_person} />
+              <InfoRow label="Anteckningar" value={trip.notes} />
+            </>
+          )}
         </div>
 
         {/* Vehicle & Driver */}
@@ -107,7 +228,24 @@ export default function TripDetailPage() {
               : null
           } />
           <InfoRow label="Förare" value={(trip.driver as any)?.full_name} />
-          <InfoRow label="Kund" value={(trip.customer as any)?.name} />
+
+          {editing ? (
+            <div className="py-3 border-b border-gray-100">
+              <label className="block text-sm text-gray-500 mb-1">Kund</label>
+              <select
+                value={form.customer_id}
+                onChange={e => setForm(f => ({ ...f, customer_id: e.target.value }))}
+                className="w-full text-sm border border-gray-300 rounded-md px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="">Ingen kund</option>
+                {customers?.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+              </select>
+            </div>
+          ) : (
+            <InfoRow label="Kund" value={(trip.customer as any)?.name} />
+          )}
 
           <h2 className="text-lg font-semibold mt-6 mb-4">Körsträcka</h2>
           <InfoRow label="Mätarställning start" value={trip.odometer_start ? `${trip.odometer_start.toLocaleString()} km` : null} />
@@ -121,26 +259,16 @@ export default function TripDetailPage() {
           )}
         </div>
 
-        {/* Map placeholder */}
+        {/* Map */}
         <div className="lg:col-span-2 bg-white rounded-lg shadow-sm border p-6">
           <h2 className="text-lg font-semibold mb-4">Karta</h2>
-          {gpsPoints && gpsPoints.length > 0 ? (
-            <div className="bg-gray-100 rounded-lg h-80 flex items-center justify-center text-gray-500">
-              <div className="text-center">
-                <p className="text-lg font-medium">Kartvy</p>
-                <p className="text-sm">{gpsPoints.length} GPS-punkter registrerade</p>
-                <p className="text-xs mt-1">
-                  {gpsPoints[0].latitude.toFixed(4)}, {gpsPoints[0].longitude.toFixed(4)}
-                  {' → '}
-                  {gpsPoints[gpsPoints.length - 1].latitude.toFixed(4)}, {gpsPoints[gpsPoints.length - 1].longitude.toFixed(4)}
-                </p>
-              </div>
-            </div>
-          ) : (
-            <div className="bg-gray-100 rounded-lg h-40 flex items-center justify-center text-gray-400">
-              Inga GPS-punkter för denna resa
-            </div>
-          )}
+          <TripMap
+            startLat={trip.start_lat}
+            startLng={trip.start_lng}
+            endLat={trip.end_lat}
+            endLng={trip.end_lng}
+            gpsPoints={gpsPoints ?? []}
+          />
         </div>
       </div>
     </div>
