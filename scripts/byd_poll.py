@@ -153,7 +153,9 @@ async def poll():
                 "end_time":     gps_ts.isoformat(),
                 "end_lat":      lat,
                 "end_lng":      lng,
+                "end_address":  coord_label(lat, lng),
                 "odometer_end": round(odometer),             # INTEGER
+                "status":       "completed",
             }).eq("id", active_trip_id).execute()
             km = odometer - (active_trip.get("odometer_start") or odometer)
             print(f"Resa avslutad: {active_trip_id} | Distans: {km:.0f} km")
