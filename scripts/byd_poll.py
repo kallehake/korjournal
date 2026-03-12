@@ -4,6 +4,7 @@ Loopar i 4 minuter med 30 sekunders intervall → ~8 GPS-punkter per körning.
 """
 import asyncio
 import json
+import math
 import os
 import sys
 import time
@@ -59,6 +60,32 @@ def geocode(lat, lng) -> str:
         return city or f"{lat:.4f}, {lng:.4f}"
     except Exception:
         return f"{lat:.4f}, {lng:.4f}"
+
+
+def _dist_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    """Avstånd i meter mellan två GPS-koordinater (Haversine)."""
+    R = 6_371_000
+    p1, p2 = math.radians(lat1), math.radians(lat2)
+    a = (math.sin((p2 - p1) / 2) ** 2
+         + math.cos(p1) * math.cos(p2) * math.sin(math.radians(lng2 - lng1) / 2) ** 2)
+    return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+
+def get_trip_type_from_geofence(database: Client, org_id: str, lat: float, lng: float) -> str:
+    """Returnerar auto_trip_type från matchande geofence, annars 'private'."""
+    resp = (database.table("geofences")
+        .select("auto_trip_type, latitude, longitude, radius_meters")
+        .eq("organization_id", org_id)
+        .eq("is_active", True)
+        .not_.is_("auto_trip_type", "null")
+        .execute())
+    if not resp or not resp.data:
+        return "private"
+    for gf in resp.data:
+        if _dist_m(lat, lng, gf["latitude"], gf["longitude"]) <= gf["radius_meters"]:
+            print(f"  Geofence-match: {gf['auto_trip_type']}")
+            return gf["auto_trip_type"]
+    return "private"
 
 
 def get_active_trip(database: Client, vehicle_id: str) -> Optional[dict]:
@@ -222,6 +249,7 @@ async def run():
 
             else:
                 if active_trip_id:
+                    trip_type = get_trip_type_from_geofence(database, org_id, lat, lng)
                     database.table("trips").update({
                         "end_time":     gps_ts.isoformat(),
                         "end_lat":      lat,
@@ -229,6 +257,7 @@ async def run():
                         "end_address":  geocode(lat, lng),
                         "odometer_end": round(odometer),
                         "status":       "completed",
+                        "trip_type":    trip_type,
                     }).eq("id", active_trip_id).execute()
                     km = odometer - (active_trip.get("odometer_start") or odometer)
                     print(f"  Resa avslutad | Distans: {km:.0f} km")
