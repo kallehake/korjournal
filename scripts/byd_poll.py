@@ -118,17 +118,15 @@ def get_last_trip_end(database: Client, vehicle_id: str) -> Optional[Tuple[float
 
 def is_polling_hours() -> bool:
     """
-    Tillåter polling vardagar 05:30–22:30 och helger 07:00–22:00 (svensk tid).
-    Utanför dessa tider lämnas bilen ifred så att den kan sova.
+    Tillåter polling vardagar 06:00–18:00 (svensk tid).
+    Utanför arbetstid lämnas bilen ifred så att den kan sova.
     """
     from zoneinfo import ZoneInfo
     now_local = datetime.now(ZoneInfo("Europe/Stockholm"))
-    weekday = now_local.weekday()   # 0=mån … 6=sön
+    if now_local.weekday() >= 5:   # lördag/söndag
+        return False
     hm = now_local.hour * 60 + now_local.minute
-    if weekday < 5:   # måndag–fredag
-        return 5 * 60 + 30 <= hm <= 22 * 60 + 30
-    else:             # lördag–söndag
-        return 7 * 60 <= hm <= 22 * 60
+    return 6 * 60 <= hm <= 18 * 60
 
 
 async def run():
