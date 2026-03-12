@@ -173,6 +173,12 @@ async def run():
 
             print(f"  {speed_kmh:.1f} km/h | {odometer:.0f} km | {lat},{lng}")
 
+            # Uppdatera fordonets aktuella mätarställning
+            if odometer > 0:
+                database.table("vehicles").update({
+                    "current_odometer": round(odometer),
+                }).eq("id", vehicle_id).execute()
+
             moving       = speed_kmh >= SPEED_START_KMH
             active_trip  = get_active_trip(database, vehicle_id)
             active_trip_id = active_trip["id"] if active_trip else None

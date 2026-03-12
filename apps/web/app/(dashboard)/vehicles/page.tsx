@@ -47,7 +47,6 @@ export default function VehiclesPage() {
       model: (fd.get('model') as string) || null,
       year: fd.get('year') ? Number(fd.get('year')) : null,
       fuel_type: fd.get('fuel_type') as FuelType,
-      current_odometer: fd.get('current_odometer') ? Number(fd.get('current_odometer')) : null,
       is_company_car: fd.get('is_company_car') === 'true',
     };
 
@@ -123,10 +122,6 @@ export default function VehiclesPage() {
                     ))}
                   </select>
                 </div>
-              </div>
-              <div>
-                <label className="label">Mätarställning (km)</label>
-                <input name="current_odometer" type="number" defaultValue={editingVehicle?.current_odometer ?? ''} className="input" placeholder="0" />
               </div>
               <div>
                 <label className="flex items-center gap-2 text-sm text-gray-700">
