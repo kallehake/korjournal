@@ -1,11 +1,23 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, useRouter } from 'next/navigation';
 import { createBrowserClient } from '../../../../lib/supabase/client';
 import { formatDate, formatTime, formatDistance, tripTypeLabel, tripStatusLabel } from '@korjournal/shared';
 import TripMap from '../../../../components/TripMap';
+
+function useGeocode(lat?: number | null, lng?: number | null) {
+  const [label, setLabel] = useState<string | null>(null);
+  useEffect(() => {
+    if (!lat || !lng) return;
+    fetch(`/api/geocode?lat=${lat}&lng=${lng}`)
+      .then(r => r.json())
+      .then(d => { if (d.label) setLabel(d.label); })
+      .catch(() => {});
+  }, [lat, lng]);
+  return label;
+}
 
 export default function TripDetailPage() {
   const { id } = useParams<{ id: string }>();
@@ -62,6 +74,9 @@ export default function TripDetailPage() {
     enabled: !!id,
   });
 
+  const startLabel = useGeocode(trip?.start_lat, trip?.start_lng);
+  const endLabel = useGeocode(trip?.end_lat, trip?.end_lng);
+
   function startEdit() {
     if (!trip) return;
     setForm({
@@ -102,21 +117,28 @@ export default function TripDetailPage() {
     return <div className="text-center py-12 text-gray-500">Resa hittades inte</div>;
   }
 
+  function formatAddress(coords: string | null | undefined, geocoded: string | null) {
+    if (!coords) return '-';
+    if (geocoded) return `${geocoded} (${coords})`;
+    return coords;
+  }
+
   const InfoRow = ({ label, value }: { label: string; value: string | null | undefined }) => (
-    <div className="py-3 border-b border-gray-100 flex justify-between">
-      <span className="text-sm text-gray-500">{label}</span>
-      <span className="text-sm font-medium text-gray-900">{value || '-'}</span>
+    <div className="py-3 border-b border-gray-100 flex justify-between gap-4">
+      <span className="text-sm text-gray-500 shrink-0">{label}</span>
+      <span className="text-sm font-medium text-gray-900 text-right">{value || '-'}</span>
     </div>
   );
 
   return (
     <div>
-      <div className="flex items-center gap-4 mb-6">
+      {/* Header */}
+      <div className="flex items-center gap-3 mb-6 flex-wrap">
         <button onClick={() => router.back()} className="text-sm text-blue-600 hover:text-blue-800">
           &larr; Tillbaka
         </button>
         <h1 className="text-2xl font-bold text-gray-900">Resdetaljer</h1>
-        <span className={`ml-auto px-3 py-1 rounded-full text-xs font-medium ${
+        <span className={`px-3 py-1 rounded-full text-xs font-medium ${
           (editing ? form.trip_type : trip.trip_type) === 'business'
             ? 'bg-blue-100 text-blue-700'
             : 'bg-purple-100 text-purple-700'
@@ -132,30 +154,32 @@ export default function TripDetailPage() {
         }`}>
           {tripStatusLabel(trip.status)}
         </span>
-        {!editing ? (
-          <button
-            onClick={startEdit}
-            className="px-4 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700"
-          >
-            Redigera
-          </button>
-        ) : (
-          <div className="flex gap-2">
+        <div className="ml-auto flex gap-2">
+          {!editing ? (
             <button
-              onClick={() => setEditing(false)}
-              className="px-4 py-1.5 bg-gray-100 text-gray-700 text-sm rounded-lg hover:bg-gray-200"
+              onClick={startEdit}
+              className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700"
             >
-              Avbryt
+              Redigera resa
             </button>
-            <button
-              onClick={save}
-              disabled={saving}
-              className="px-4 py-1.5 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50"
-            >
-              {saving ? 'Sparar...' : 'Spara'}
-            </button>
-          </div>
-        )}
+          ) : (
+            <>
+              <button
+                onClick={() => setEditing(false)}
+                className="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200"
+              >
+                Avbryt
+              </button>
+              <button
+                onClick={save}
+                disabled={saving}
+                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50"
+              >
+                {saving ? 'Sparar...' : 'Spara'}
+              </button>
+            </>
+          )}
+        </div>
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -165,8 +189,8 @@ export default function TripDetailPage() {
           <InfoRow label="Datum" value={formatDate(trip.date)} />
           <InfoRow label="Starttid" value={formatTime(trip.start_time)} />
           <InfoRow label="Sluttid" value={trip.end_time ? formatTime(trip.end_time) : null} />
-          <InfoRow label="Startadress" value={trip.start_address} />
-          <InfoRow label="Slutadress" value={trip.end_address} />
+          <InfoRow label="Startadress" value={formatAddress(trip.start_address, startLabel)} />
+          <InfoRow label="Slutadress" value={formatAddress(trip.end_address, endLabel)} />
 
           {editing ? (
             <>
@@ -269,6 +293,11 @@ export default function TripDetailPage() {
             endLng={trip.end_lng}
             gpsPoints={gpsPoints ?? []}
           />
+          {gpsPoints && gpsPoints.length > 0 && (
+            <p className="text-xs text-gray-400 mt-2 text-center">
+              {gpsPoints.length} GPS-punkter registrerade
+            </p>
+          )}
         </div>
       </div>
     </div>
