@@ -64,7 +64,7 @@ def geocode(lat, lng) -> str:
 def get_active_trip(database: Client, vehicle_id: str) -> Optional[dict]:
     cutoff = (now_utc() - timedelta(hours=MAX_TRIP_AGE_H)).isoformat()
     resp = (database.table("trips")
-        .select("id, odometer_start")
+        .select("id, odometer_start, start_lat, start_lng, start_time")
         .eq("vehicle_id", vehicle_id)
         .is_("end_time", "null")
         .gte("start_time", cutoff)
@@ -226,6 +226,53 @@ async def run():
                     }).eq("id", active_trip_id).execute()
                     km = odometer - (active_trip.get("odometer_start") or odometer)
                     print(f"  Resa avslutad | Distans: {km:.0f} km")
+
+                    # ── Trängselskatt-detektion ───────────────────────────
+                    try:
+                        from congestion_stations import detect_passages
+                        gps_resp = (database.table("gps_points")
+                            .select("timestamp, latitude, longitude")
+                            .eq("trip_id", active_trip_id)
+                            .order("timestamp")
+                            .execute())
+                        gps_track = []
+                        if active_trip.get("start_lat"):
+                            gps_track.append({
+                                "ts":  active_trip["start_time"],
+                                "lat": active_trip["start_lat"],
+                                "lng": active_trip["start_lng"],
+                            })
+                        for gp in (gps_resp.data or []):
+                            gps_track.append({
+                                "ts":  gp["timestamp"],
+                                "lat": gp["latitude"],
+                                "lng": gp["longitude"],
+                            })
+                        gps_track.append({"ts": gps_ts.isoformat(), "lat": lat, "lng": lng})
+
+                        passages = detect_passages(gps_track)
+                        total_congestion = 0
+                        for passage in passages:
+                            database.table("congestion_tax_passages").insert({
+                                "trip_id":        active_trip_id,
+                                "vehicle_id":     vehicle_id,
+                                "station_name":   passage["station"]["name"],
+                                "city":           passage["station"]["city"],
+                                "latitude":       passage["station"]["lat"],
+                                "longitude":      passage["station"]["lng"],
+                                "passage_time":   passage["passage_time"].isoformat(),
+                                "amount_sek":     passage["amount_sek"],
+                                "is_high_traffic": passage["is_high_traffic"],
+                            }).execute()
+                            total_congestion += passage["amount_sek"]
+                            print(f"  Trängselskatt: {passage['station']['name']} {passage['amount_sek']} kr")
+                        if total_congestion > 0:
+                            database.table("trips").update({
+                                "congestion_tax_total": total_congestion,
+                            }).eq("id", active_trip_id).execute()
+                            print(f"  Totalt trängselskatt: {total_congestion} kr")
+                    except Exception as cong_err:
+                        print(f"  Trängselskatt-detektion misslyckades: {cong_err}", file=sys.stderr)
                 else:
                     print("  Bilen är still, ingen aktiv resa.")
 
