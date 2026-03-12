@@ -24,10 +24,3 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
         run: python scripts/byd_poll.py
 
-      - name: Tesla — hämta kördata
-        env:
-          TESLA_REFRESH_TOKEN:       ${{ secrets.TESLA_REFRESH_TOKEN }}
-          TESLA_VIN:                 ${{ secrets.TESLA_VIN }}
-          SUPABASE_URL:              ${{ secrets.SUPABASE_URL }}
-          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
-        run: python scripts/tesla_poll.py
