@@ -15,6 +15,7 @@ import {
   Legend,
 } from "recharts";
 import StatCard from "@/components/StatCard";
+import GeoAddress from "@/components/GeoAddress";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
 
 const MONTHS = ["Jan","Feb","Mar","Apr","Maj","Jun","Jul","Aug","Sep","Okt","Nov","Dec"];
@@ -214,9 +215,9 @@ export default function DashboardPage() {
                       <td className="table-cell">{(trip.profiles as any)?.full_name ?? "–"}</td>
                       <td className="table-cell font-mono text-xs">{(trip.vehicles as any)?.registration_number ?? "–"}</td>
                       <td className="table-cell">
-                        <span className="text-gray-500">{trip.start_address}</span>
+                        <span className="text-gray-500"><GeoAddress address={trip.start_address} /></span>
                         <span className="mx-1.5 text-gray-300">&rarr;</span>
-                        <span>{trip.end_address ?? "–"}</span>
+                        <span><GeoAddress address={trip.end_address} /></span>
                       </td>
                       <td className="table-cell font-medium">{dist != null ? `${Math.round(dist)} km` : "–"}</td>
                       <td className="table-cell">

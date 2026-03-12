@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState, useRef } from 'react';
-import { MapContainer, TileLayer, Marker, Polyline, Popup, useMap } from 'react-leaflet';
+import { useEffect, useState } from 'react';
+import { MapContainer, TileLayer, Marker, Polyline, CircleMarker, Popup, useMap } from 'react-leaflet';
 
 interface GpsPoint { latitude: number; longitude: number; timestamp: string; }
 
@@ -31,7 +31,6 @@ function decodePolyline(encoded: string): [number, number][] {
 function FitBounds({ positions }: { positions: [number, number][] }) {
   const map = useMap();
   useEffect(() => {
-    if (typeof window === 'undefined') return;
     import('leaflet').then(L => {
       if (positions.length > 1) map.fitBounds(L.latLngBounds(positions), { padding: [40, 40] });
       else if (positions.length === 1) map.setView(positions[0], 14);
@@ -41,7 +40,6 @@ function FitBounds({ positions }: { positions: [number, number][] }) {
 }
 
 export default function TripMapInner({ startLat, startLng, endLat, endLng, gpsPoints }: Props) {
-  const hasGps = gpsPoints && gpsPoints.length > 0;
   const [googleRoute, setGoogleRoute] = useState<[number, number][] | null>(null);
   const [routeLoading, setRouteLoading] = useState(false);
   const [icons, setIcons] = useState<{ start: any; end: any } | null>(null);
@@ -49,38 +47,43 @@ export default function TripMapInner({ startLat, startLng, endLat, endLng, gpsPo
   // Initialize Leaflet icons inside useEffect (browser only)
   useEffect(() => {
     import('leaflet').then(L => {
-      const startIcon = new L.Icon({
-        iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
+      const base = {
         iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
         shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
-        iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41],
-        className: 'leaflet-marker-start',
+        iconSize: [25, 41] as [number, number],
+        iconAnchor: [12, 41] as [number, number],
+        popupAnchor: [1, -34] as [number, number],
+        shadowSize: [41, 41] as [number, number],
+      };
+      setIcons({
+        start: new L.Icon({ ...base, iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png' }),
+        end:   new L.Icon({ ...base, iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png' }),
       });
-      const endIcon = new L.Icon({
-        iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
-        iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
-        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
-        iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41],
-      });
-      setIcons({ start: startIcon, end: endIcon });
     });
   }, []);
 
+  // Always use Google Directions for the route line (actual roads)
   useEffect(() => {
-    if (hasGps || !startLat || !startLng || !endLat || !endLng) return;
+    if (!startLat || !startLng || !endLat || !endLng) return;
     setRouteLoading(true);
     fetch(`/api/directions?origin=${startLat},${startLng}&destination=${endLat},${endLng}`)
       .then(r => r.json())
       .then(data => { if (data.polyline) setGoogleRoute(decodePolyline(data.polyline)); })
       .catch(() => {})
       .finally(() => setRouteLoading(false));
-  }, [hasGps, startLat, startLng, endLat, endLng]);
+  }, [startLat, startLng, endLat, endLng]);
 
-  const routePositions: [number, number][] = hasGps
-    ? gpsPoints.map(p => [p.latitude, p.longitude])
-    : googleRoute ?? (startLat && startLng && endLat && endLng
+  // Route line: Google Directions road route, fallback to straight line
+  const routeLine: [number, number][] = googleRoute
+    ?? (startLat && startLng && endLat && endLng
         ? [[startLat, startLng], [endLat, endLng]]
         : []);
+
+  // GPS intermediate points (for position markers, not the route)
+  const gpsMarkers: [number, number][] = (gpsPoints ?? []).map(p => [p.latitude, p.longitude]);
+
+  // All positions for fitting the map bounds
+  const allPositions: [number, number][] = routeLine.length > 0 ? routeLine : gpsMarkers;
 
   const center: [number, number] = startLat && startLng ? [startLat, startLng] : [59.33, 18.07];
 
@@ -92,8 +95,14 @@ export default function TripMapInner({ startLat, startLng, endLat, endLng, gpsPo
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
-          <FitBounds positions={routePositions} />
+          <FitBounds positions={allPositions} />
 
+          {/* Route line along actual roads */}
+          {routeLine.length > 1 && (
+            <Polyline positions={routeLine} color="#2563eb" weight={4} />
+          )}
+
+          {/* Start/end markers */}
           {startLat && startLng && icons && (
             <Marker position={[startLat, startLng]} icon={icons.start}>
               <Popup>Start</Popup>
@@ -105,20 +114,21 @@ export default function TripMapInner({ startLat, startLng, endLat, endLng, gpsPo
             </Marker>
           )}
 
-          {routePositions.length > 1 && (
-            <Polyline positions={routePositions} color="#2563eb" weight={4} />
-          )}
+          {/* GPS waypoints as small dots */}
+          {gpsMarkers.map((pos, i) => (
+            <CircleMarker key={i} center={pos} radius={4} color="#2563eb" fillColor="#93c5fd" fillOpacity={0.8} weight={2}>
+              <Popup>GPS-punkt {i + 1}</Popup>
+            </CircleMarker>
+          ))}
         </MapContainer>
       </div>
-      {!hasGps && (
-        <p className="text-xs text-gray-400 mt-2 text-center">
-          {routeLoading
-            ? 'Hämtar rutt från Google Maps...'
-            : googleRoute
-            ? 'Rutt beräknad av Google Maps (uppskattad)'
-            : 'Inga GPS-punkter sparade'}
-        </p>
-      )}
+      <p className="text-xs text-gray-400 mt-2 text-center">
+        {routeLoading
+          ? 'Hämtar vägkarta...'
+          : googleRoute
+          ? `Väg från Google Maps${gpsMarkers.length > 0 ? ` · ${gpsMarkers.length} GPS-punkter` : ''}`
+          : 'Rak linje (Google Maps ej tillgänglig)'}
+      </p>
     </div>
   );
 }

@@ -2,8 +2,10 @@
 BYD cloud poller — körs var 5:e minut via GitHub Actions.
 """
 import asyncio
+import json
 import os
 import sys
+import urllib.request
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 
@@ -32,11 +34,31 @@ def now_utc() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def coord_label(lat, lng) -> str:
-    """Enkel koordinattext som start_address (NOT NULL kräver ett värde)."""
-    if lat and lng:
+def geocode(lat, lng) -> str:
+    """Reverse geocoding via Nominatim. Fallback till koordinatsträng."""
+    if not lat or not lng:
+        return "Okänd position"
+    try:
+        url = (
+            f"https://nominatim.openstreetmap.org/reverse"
+            f"?format=json&lat={lat}&lon={lng}&accept-language=sv"
+        )
+        req = urllib.request.Request(url, headers={"User-Agent": "Korjournal/1.0"})
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            data = json.loads(resp.read())
+        addr = data.get("address", {})
+        road = addr.get("road", "")
+        city = (
+            addr.get("city")
+            or addr.get("town")
+            or addr.get("village")
+            or addr.get("municipality", "")
+        )
+        if road and city:
+            return f"{road}, {city}"
+        return city or f"{lat:.4f}, {lng:.4f}"
+    except Exception:
         return f"{lat:.4f}, {lng:.4f}"
-    return "Okänd position"
 
 
 async def poll():
@@ -129,11 +151,11 @@ async def poll():
                 "vehicle_id":      vehicle_id,
                 "driver_id":       driver_id,
                 "start_time":      gps_ts.isoformat(),
-                "start_address":   coord_label(lat, lng),   # NOT NULL
+                "start_address":   geocode(lat, lng),
                 "start_lat":       lat,
                 "start_lng":       lng,
                 "odometer_start":  round(odometer),          # INTEGER
-                "trip_type":       "business",
+                "trip_type":       "private",                # Klassificera manuellt
             }).execute()
             active_trip_id = trip.data[0]["id"]
             print(f"Resa startad: {active_trip_id} | Start: {odometer:.0f} km")
@@ -153,7 +175,7 @@ async def poll():
                 "end_time":     gps_ts.isoformat(),
                 "end_lat":      lat,
                 "end_lng":      lng,
-                "end_address":  coord_label(lat, lng),
+                "end_address":  geocode(lat, lng),
                 "odometer_end": round(odometer),             # INTEGER
                 "status":       "completed",
             }).eq("id", active_trip_id).execute()

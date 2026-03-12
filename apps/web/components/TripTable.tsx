@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { useState } from "react";
+import GeoAddress from "./GeoAddress";
 
 export interface TripRow {
   id: string;
@@ -99,9 +100,9 @@ export default function TripTable({ trips }: TripTableProps) {
                 <td className="table-cell">{trip.driver?.full_name ?? "–"}</td>
                 <td className="table-cell font-mono text-xs">{trip.vehicle?.registration_number ?? "–"}</td>
                 <td className="table-cell">
-                  <span className="text-gray-500">{trip.start_address}</span>
+                  <span className="text-gray-500"><GeoAddress address={trip.start_address} /></span>
                   <span className="mx-1.5 text-gray-300">&rarr;</span>
-                  <span>{trip.end_address ?? "–"}</span>
+                  <span><GeoAddress address={trip.end_address} /></span>
                 </td>
                 <td className="table-cell font-medium">{dist != null ? `${Math.round(dist)} km` : "–"}</td>
                 <td className="table-cell">
