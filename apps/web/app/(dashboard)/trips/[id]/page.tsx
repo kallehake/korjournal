@@ -133,52 +133,56 @@ export default function TripDetailPage() {
   return (
     <div>
       {/* Header */}
-      <div className="flex items-center gap-3 mb-6 flex-wrap">
-        <button onClick={() => router.back()} className="text-sm text-blue-600 hover:text-blue-800">
-          &larr; Tillbaka
+      <div className="mb-6">
+        <button onClick={() => router.back()} className="text-sm text-blue-600 hover:text-blue-800 mb-3 block">
+          &larr; Tillbaka till resor
         </button>
-        <h1 className="text-2xl font-bold text-gray-900">Resdetaljer</h1>
-        <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-          (editing ? form.trip_type : trip.trip_type) === 'business'
-            ? 'bg-blue-100 text-blue-700'
-            : 'bg-purple-100 text-purple-700'
-        }`}>
-          {tripTypeLabel(editing ? form.trip_type : trip.trip_type)}
-        </span>
-        <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-          trip.status === 'completed'
-            ? 'bg-green-100 text-green-700'
-            : trip.status === 'active'
-            ? 'bg-yellow-100 text-yellow-700'
-            : 'bg-gray-100 text-gray-700'
-        }`}>
-          {tripStatusLabel(trip.status)}
-        </span>
-        <div className="ml-auto flex gap-2">
-          {!editing ? (
-            <button
-              onClick={startEdit}
-              className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700"
-            >
-              Redigera resa
-            </button>
-          ) : (
-            <>
+        <div className="flex items-center justify-between gap-4">
+          <div className="flex items-center gap-3 flex-wrap">
+            <h1 className="text-2xl font-bold text-gray-900">Resdetaljer</h1>
+            <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+              (editing ? form.trip_type : trip.trip_type) === 'business'
+                ? 'bg-blue-100 text-blue-700'
+                : 'bg-purple-100 text-purple-700'
+            }`}>
+              {tripTypeLabel(editing ? form.trip_type : trip.trip_type)}
+            </span>
+            <span className={`px-3 py-1 rounded-full text-xs font-medium ${
+              trip.status === 'completed'
+                ? 'bg-green-100 text-green-700'
+                : trip.status === 'active'
+                ? 'bg-yellow-100 text-yellow-700'
+                : 'bg-gray-100 text-gray-700'
+            }`}>
+              {tripStatusLabel(trip.status)}
+            </span>
+          </div>
+          <div className="flex gap-2 shrink-0">
+            {!editing ? (
               <button
-                onClick={() => setEditing(false)}
-                className="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200"
+                onClick={startEdit}
+                className="px-5 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 shadow"
               >
-                Avbryt
+                ✏️ Redigera resa
               </button>
-              <button
-                onClick={save}
-                disabled={saving}
-                className="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:opacity-50"
-              >
-                {saving ? 'Sparar...' : 'Spara'}
-              </button>
-            </>
-          )}
+            ) : (
+              <>
+                <button
+                  onClick={() => setEditing(false)}
+                  className="px-4 py-2 bg-gray-200 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-300"
+                >
+                  Avbryt
+                </button>
+                <button
+                  onClick={save}
+                  disabled={saving}
+                  className="px-5 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 disabled:opacity-50 shadow"
+                >
+                  {saving ? 'Sparar...' : '✓ Spara ändringar'}
+                </button>
+              </>
+            )}
+          </div>
         </div>
       </div>
 

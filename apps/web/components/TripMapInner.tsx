@@ -1,27 +1,17 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { MapContainer, TileLayer, Marker, Polyline, Popup, useMap } from 'react-leaflet';
-import L from 'leaflet';
 
-delete (L.Icon.Default.prototype as any)._getIconUrl;
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
-  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
-});
+interface GpsPoint { latitude: number; longitude: number; timestamp: string; }
 
-const startIcon = new L.Icon({
-  iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
-  iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41],
-});
-
-const endIcon = new L.Icon({
-  iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
-  iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41],
-});
+interface Props {
+  startLat?: number | null;
+  startLng?: number | null;
+  endLat?: number | null;
+  endLng?: number | null;
+  gpsPoints?: GpsPoint[];
+}
 
 function decodePolyline(encoded: string): [number, number][] {
   const points: [number, number][] = [];
@@ -38,21 +28,14 @@ function decodePolyline(encoded: string): [number, number][] {
   return points;
 }
 
-interface GpsPoint { latitude: number; longitude: number; timestamp: string; }
-
-interface Props {
-  startLat?: number | null;
-  startLng?: number | null;
-  endLat?: number | null;
-  endLng?: number | null;
-  gpsPoints?: GpsPoint[];
-}
-
 function FitBounds({ positions }: { positions: [number, number][] }) {
   const map = useMap();
   useEffect(() => {
-    if (positions.length > 1) map.fitBounds(L.latLngBounds(positions), { padding: [40, 40] });
-    else if (positions.length === 1) map.setView(positions[0], 14);
+    if (typeof window === 'undefined') return;
+    import('leaflet').then(L => {
+      if (positions.length > 1) map.fitBounds(L.latLngBounds(positions), { padding: [40, 40] });
+      else if (positions.length === 1) map.setView(positions[0], 14);
+    });
   }, [map, positions]);
   return null;
 }
@@ -61,15 +44,35 @@ export default function TripMapInner({ startLat, startLng, endLat, endLng, gpsPo
   const hasGps = gpsPoints && gpsPoints.length > 0;
   const [googleRoute, setGoogleRoute] = useState<[number, number][] | null>(null);
   const [routeLoading, setRouteLoading] = useState(false);
+  const [icons, setIcons] = useState<{ start: any; end: any } | null>(null);
+
+  // Initialize Leaflet icons inside useEffect (browser only)
+  useEffect(() => {
+    import('leaflet').then(L => {
+      const startIcon = new L.Icon({
+        iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
+        iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
+        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
+        iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41],
+        className: 'leaflet-marker-start',
+      });
+      const endIcon = new L.Icon({
+        iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
+        iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
+        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
+        iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34], shadowSize: [41, 41],
+      });
+      setIcons({ start: startIcon, end: endIcon });
+    });
+  }, []);
 
   useEffect(() => {
     if (hasGps || !startLat || !startLng || !endLat || !endLng) return;
     setRouteLoading(true);
     fetch(`/api/directions?origin=${startLat},${startLng}&destination=${endLat},${endLng}`)
       .then(r => r.json())
-      .then(data => {
-        if (data.polyline) setGoogleRoute(decodePolyline(data.polyline));
-      })
+      .then(data => { if (data.polyline) setGoogleRoute(decodePolyline(data.polyline)); })
+      .catch(() => {})
       .finally(() => setRouteLoading(false));
   }, [hasGps, startLat, startLng, endLat, endLng]);
 
@@ -91,11 +94,15 @@ export default function TripMapInner({ startLat, startLng, endLat, endLng, gpsPo
           />
           <FitBounds positions={routePositions} />
 
-          {startLat && startLng && (
-            <Marker position={[startLat, startLng]} icon={startIcon}><Popup>Start</Popup></Marker>
+          {startLat && startLng && icons && (
+            <Marker position={[startLat, startLng]} icon={icons.start}>
+              <Popup>Start</Popup>
+            </Marker>
           )}
-          {endLat && endLng && (
-            <Marker position={[endLat, endLng]} icon={endIcon}><Popup>Slut</Popup></Marker>
+          {endLat && endLng && icons && (
+            <Marker position={[endLat, endLng]} icon={icons.end}>
+              <Popup>Slut</Popup>
+            </Marker>
           )}
 
           {routePositions.length > 1 && (
@@ -108,7 +115,7 @@ export default function TripMapInner({ startLat, startLng, endLat, endLng, gpsPo
           {routeLoading
             ? 'Hämtar rutt från Google Maps...'
             : googleRoute
-            ? 'Rutt beräknad av Google Maps (uppskattad — faktisk körväg kan skilja sig)'
+            ? 'Rutt beräknad av Google Maps (uppskattad)'
             : 'Inga GPS-punkter sparade'}
         </p>
       )}
