@@ -1,13 +1,15 @@
 """
 BYD cloud poller — körs var 5:e minut via GitHub Actions.
+Loopar i 4 minuter med 30 sekunders intervall → ~8 GPS-punkter per körning.
 """
 import asyncio
 import json
 import os
 import sys
+import time
 import urllib.request
 from datetime import datetime, timezone, timedelta
-from typing import Optional
+from typing import Optional, Tuple
 
 from pybyd.client import BydClient
 from pybyd.config import BydConfig
@@ -18,16 +20,14 @@ BYD_PASSWORD = os.environ["BYD_PASSWORD"]
 SUPABASE_URL = os.environ["SUPABASE_URL"]
 SUPABASE_KEY = os.environ["SUPABASE_SERVICE_ROLE_KEY"]
 
-SPEED_START_KMH = 5.0
-MAX_TRIP_AGE_H  = 24
+SPEED_START_KMH  = 5.0
+MAX_TRIP_AGE_H   = 24
+LOOP_SECONDS     = 240   # kör i 4 minuter
+POLL_INTERVAL_S  = 30    # sekunder mellan varje poll
 
 
 def sb() -> Client:
     return create_client(SUPABASE_URL, SUPABASE_KEY)
-
-
-def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
 
 
 def now_utc() -> datetime:
@@ -61,7 +61,35 @@ def geocode(lat, lng) -> str:
         return f"{lat:.4f}, {lng:.4f}"
 
 
-async def poll():
+def get_active_trip(database: Client, vehicle_id: str) -> Optional[dict]:
+    cutoff = (now_utc() - timedelta(hours=MAX_TRIP_AGE_H)).isoformat()
+    resp = (database.table("trips")
+        .select("id, odometer_start")
+        .eq("vehicle_id", vehicle_id)
+        .is_("end_time", "null")
+        .gte("start_time", cutoff)
+        .order("start_time", desc=True)
+        .limit(1)
+        .execute())
+    return resp.data[0] if resp and resp.data else None
+
+
+def get_last_trip_end(database: Client, vehicle_id: str) -> Optional[Tuple[float, float]]:
+    """Senaste avslutade resans slutposition — används som startpunkt om bilen precis börjat köra."""
+    resp = (database.table("trips")
+        .select("end_lat, end_lng")
+        .eq("vehicle_id", vehicle_id)
+        .eq("status", "completed")
+        .not_.is_("end_lat", "null")
+        .order("end_time", desc=True)
+        .limit(1)
+        .execute())
+    if resp and resp.data:
+        return resp.data[0]["end_lat"], resp.data[0]["end_lng"]
+    return None
+
+
+async def run():
     database = sb()
 
     config = BydConfig(
@@ -82,108 +110,140 @@ async def poll():
             return
 
         byd_vehicle = byd_vehicles[0]
-        vin         = byd_vehicle.vin
-        plate       = byd_vehicle.auto_plate
-
+        vin   = byd_vehicle.vin
+        plate = byd_vehicle.auto_plate
         print(f"Fordon: {vin} ({plate})")
 
-        rt  = await client.get_vehicle_realtime(vin)
-        gps = await client.get_gps_info(vin)
+        # Hämta fordon och förare en gång
+        veh_resp = (database.table("vehicles")
+            .select("id, organization_id")
+            .ilike("registration_number", plate.replace(" ", ""))
+            .eq("is_active", True)
+            .limit(1)
+            .execute())
 
-    speed_kmh = rt.speed        if rt.speed        is not None else 0.0
-    odometer  = rt.total_mileage if rt.total_mileage is not None else 0.0
-    lat       = gps.latitude
-    lng       = gps.longitude
-    gps_ts    = gps.gps_timestamp or now_utc()
+        if not veh_resp.data:
+            print(f"Fordon {plate} finns ej i Supabase.", file=sys.stderr)
+            return
 
-    print(f"Hastighet: {speed_kmh:.1f} km/h | Odometer: {odometer:.0f} km | Pos: {lat},{lng}")
+        vehicle_id = veh_resp.data[0]["id"]
+        org_id     = veh_resp.data[0]["organization_id"]
 
-    # ── Hitta fordon i Supabase ────────────────────────────────────────────────
-    veh_resp = (database.table("vehicles")
-        .select("id, organization_id")
-        .ilike("registration_number", plate.replace(" ", ""))
-        .eq("is_active", True)
-        .limit(1)
-        .execute())
+        driver_resp = (database.table("profiles")
+            .select("id")
+            .eq("organization_id", org_id)
+            .order("created_at")
+            .limit(1)
+            .execute())
 
-    if not veh_resp.data:
-        print(f"Fordon {plate} finns ej i Supabase.", file=sys.stderr)
-        return
+        if not driver_resp.data:
+            print("Ingen förare hittades.", file=sys.stderr)
+            return
 
-    vehicle_id = veh_resp.data[0]["id"]
-    org_id     = veh_resp.data[0]["organization_id"]
+        driver_id = driver_resp.data[0]["id"]
 
-    # ── Välj förare ───────────────────────────────────────────────────────────
-    driver_resp = (database.table("profiles")
-        .select("id")
-        .eq("organization_id", org_id)
-        .order("created_at")
-        .limit(1)
-        .execute())
+        # ── Pollingsloop ──────────────────────────────────────────────────────
+        loop_start  = time.monotonic()
+        prev_lat    = None
+        prev_lng    = None
+        prev_moving = False
+        iteration   = 0
 
-    if not driver_resp.data:
-        print("Ingen förare hittades.", file=sys.stderr)
-        return
+        while True:
+            elapsed = time.monotonic() - loop_start
+            if elapsed >= LOOP_SECONDS:
+                break
 
-    driver_id = driver_resp.data[0]["id"]
+            iteration += 1
+            print(f"\n── Iteration {iteration} ({int(elapsed)}s) ──")
 
-    # ── Hitta aktiv resa ──────────────────────────────────────────────────────
-    cutoff = (now_utc() - timedelta(hours=MAX_TRIP_AGE_H)).isoformat()
-    active_resp = (database.table("trips")
-        .select("id, odometer_start")
-        .eq("vehicle_id", vehicle_id)
-        .is_("end_time", "null")
-        .gte("start_time", cutoff)
-        .order("start_time", desc=True)
-        .limit(1)
-        .execute())
+            try:
+                rt  = await client.get_vehicle_realtime(vin)
+                gps = await client.get_gps_info(vin)
+            except Exception as e:
+                print(f"API-fel: {e}", file=sys.stderr)
+                await asyncio.sleep(POLL_INTERVAL_S)
+                continue
 
-    active_trip: Optional[dict] = (active_resp.data[0] if active_resp and active_resp.data else None)
-    active_trip_id: Optional[str] = active_trip["id"] if active_trip else None
+            speed_kmh = rt.speed        if rt.speed        is not None else 0.0
+            odometer  = rt.total_mileage if rt.total_mileage is not None else 0.0
+            lat       = gps.latitude
+            lng       = gps.longitude
+            gps_ts    = gps.gps_timestamp or now_utc()
 
-    # ── Trip-logik ─────────────────────────────────────────────────────────────
-    moving = speed_kmh >= SPEED_START_KMH
+            print(f"  {speed_kmh:.1f} km/h | {odometer:.0f} km | {lat},{lng}")
 
-    if moving:
-        if not active_trip_id:
-            trip = database.table("trips").insert({
-                "organization_id": org_id,
-                "vehicle_id":      vehicle_id,
-                "driver_id":       driver_id,
-                "start_time":      gps_ts.isoformat(),
-                "start_address":   geocode(lat, lng),
-                "start_lat":       lat,
-                "start_lng":       lng,
-                "odometer_start":  round(odometer),          # INTEGER
-                "trip_type":       "private",                # Klassificera manuellt
-            }).execute()
-            active_trip_id = trip.data[0]["id"]
-            print(f"Resa startad: {active_trip_id} | Start: {odometer:.0f} km")
-        else:
-            database.table("gps_points").insert({
-                "trip_id":   active_trip_id,
-                "timestamp": gps_ts.isoformat(),
-                "latitude":  lat,
-                "longitude": lng,
-                "speed":     round(speed_kmh / 3.6, 2),     # km/h → m/s
-            }).execute()
-            print(f"GPS-punkt sparad | Resa: {active_trip_id}")
+            moving       = speed_kmh >= SPEED_START_KMH
+            active_trip  = get_active_trip(database, vehicle_id)
+            active_trip_id = active_trip["id"] if active_trip else None
 
-    else:
-        if active_trip_id:
-            database.table("trips").update({
-                "end_time":     gps_ts.isoformat(),
-                "end_lat":      lat,
-                "end_lng":      lng,
-                "end_address":  geocode(lat, lng),
-                "odometer_end": round(odometer),             # INTEGER
-                "status":       "completed",
-            }).eq("id", active_trip_id).execute()
-            km = odometer - (active_trip.get("odometer_start") or odometer)
-            print(f"Resa avslutad: {active_trip_id} | Distans: {km:.0f} km")
-        else:
-            print("Bilen är still, ingen aktiv resa.")
+            if moving:
+                if not active_trip_id:
+                    # Bil precis börjat köra — använd föregående position som startpunkt
+                    if prev_lat and not prev_moving:
+                        start_lat = prev_lat
+                        start_lng = prev_lng
+                    elif not prev_moving:
+                        # Första iterationen och redan rörlig — ta sista resans slutpunkt
+                        last_end = get_last_trip_end(database, vehicle_id)
+                        start_lat = last_end[0] if last_end else lat
+                        start_lng = last_end[1] if last_end else lng
+                    else:
+                        start_lat, start_lng = lat, lng
+
+                    trip = database.table("trips").insert({
+                        "organization_id": org_id,
+                        "vehicle_id":      vehicle_id,
+                        "driver_id":       driver_id,
+                        "start_time":      gps_ts.isoformat(),
+                        "start_address":   geocode(start_lat, start_lng),
+                        "start_lat":       start_lat,
+                        "start_lng":       start_lng,
+                        "odometer_start":  round(odometer),
+                        "trip_type":       "private",
+                    }).execute()
+                    active_trip_id = trip.data[0]["id"]
+                    print(f"  Resa startad: {active_trip_id}")
+                else:
+                    database.table("gps_points").insert({
+                        "trip_id":   active_trip_id,
+                        "timestamp": gps_ts.isoformat(),
+                        "latitude":  lat,
+                        "longitude": lng,
+                        "speed":     round(speed_kmh / 3.6, 2),
+                    }).execute()
+                    print(f"  GPS-punkt sparad")
+
+            else:
+                if active_trip_id:
+                    database.table("trips").update({
+                        "end_time":     gps_ts.isoformat(),
+                        "end_lat":      lat,
+                        "end_lng":      lng,
+                        "end_address":  geocode(lat, lng),
+                        "odometer_end": round(odometer),
+                        "status":       "completed",
+                    }).eq("id", active_trip_id).execute()
+                    km = odometer - (active_trip.get("odometer_start") or odometer)
+                    print(f"  Resa avslutad | Distans: {km:.0f} km")
+                else:
+                    print("  Bilen är still, ingen aktiv resa.")
+
+            prev_lat    = lat
+            prev_lng    = lng
+            prev_moving = moving
+
+            # Vänta till nästa poll (men överskrid ej looptiden)
+            remaining = LOOP_SECONDS - (time.monotonic() - loop_start)
+            if remaining > POLL_INTERVAL_S:
+                await asyncio.sleep(POLL_INTERVAL_S)
+            elif remaining > 2:
+                await asyncio.sleep(remaining)
+            else:
+                break
+
+    print(f"\nKlar. {iteration} iterationer på {int(time.monotonic() - loop_start)}s.")
 
 
 if __name__ == "__main__":
-    asyncio.run(poll())
+    asyncio.run(run())
