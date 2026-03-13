@@ -255,7 +255,15 @@ STATIONS: List[Dict] = [
 
 # ── Detektering ───────────────────────────────────────────────────────────────
 
-PASSAGE_RADIUS_M = 150  # meter — hanterar 30s intervall upp till ~160 km/h
+# 60 m räcker för 30s-intervall upp till ~100 km/h tack vare segmentinterpolation.
+# Smalare radie minskar falskt positiva träffar vid tätt liggande stationer.
+PASSAGE_RADIUS_M = 60
+
+# Dagtak per stad (SEK) — fordon betalar högst detta per 24-timmarsdygn
+DAILY_MAX_SEK = {
+    "Gothenburg": 60,
+    "Stockholm":  135,
+}
 
 
 def detect_passages(gps_points: List[Dict]) -> List[Dict]:
@@ -265,8 +273,14 @@ def detect_passages(gps_points: List[Dict]) -> List[Dict]:
     gps_points: [{"ts": datetime (UTC) eller ISO-sträng, "lat": float, "lng": float}, ...]
     Returnerar: [{"station": dict, "passage_time": datetime(UTC),
                   "amount_sek": int, "is_high_traffic": bool}, ...]
+
+    Dubbeldetektion inom DEDUP_RADIUS_M / DEDUP_MINUTES filtreras bort
+    (täta stationpar som Olskroksmotet + Redbergsvägen).
     """
     from zoneinfo import ZoneInfo
+
+    DEDUP_RADIUS_M   = 200   # stationer inom 200 m räknas som samma passage
+    DEDUP_MINUTES    = 5     # …och inom 5 minuter av varandra
 
     if not gps_points:
         return []
@@ -289,7 +303,7 @@ def detect_passages(gps_points: List[Dict]) -> List[Dict]:
         return []
 
     tz = ZoneInfo("Europe/Stockholm")
-    detected = []
+    raw = []
 
     for station in STATIONS:
         slat, slng = station["lat"], station["lng"]
@@ -306,13 +320,33 @@ def detect_passages(gps_points: List[Dict]) -> List[Dict]:
                 local_ts = passage_ts.astimezone(tz)
                 amount, high_traffic = get_amount(station, local_ts)
                 if amount > 0:
-                    detected.append({
+                    raw.append({
                         "station":         station,
                         "passage_time":    passage_ts,
                         "amount_sek":      amount,
                         "is_high_traffic": high_traffic,
                     })
                 break  # en detektion per station per resa
+
+    # ── Deduplicera tätt liggande stationer ────────────────────────────────
+    # Behåll den som detekterades tidigast; droppa överlappande.
+    raw.sort(key=lambda p: p["passage_time"])
+    detected: List[Dict] = []
+    for candidate in raw:
+        clat = candidate["station"]["lat"]
+        clng = candidate["station"]["lng"]
+        ct   = candidate["passage_time"]
+        duplicate = False
+        for kept in detected:
+            klat = kept["station"]["lat"]
+            klng = kept["station"]["lng"]
+            kt   = kept["passage_time"]
+            if (_haversine_m(clat, clng, klat, klng) <= DEDUP_RADIUS_M
+                    and abs((ct - kt).total_seconds()) <= DEDUP_MINUTES * 60):
+                duplicate = True
+                break
+        if not duplicate:
+            detected.append(candidate)
 
     return detected
 

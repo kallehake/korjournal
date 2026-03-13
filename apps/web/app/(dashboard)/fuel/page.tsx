@@ -41,8 +41,12 @@ export default function FuelPage() {
 
   const saveMutation = useMutation({
     mutationFn: async () => {
+      const { data: profile } = await supabase.from('profiles').select('id, organization_id').single();
+      if (!profile) throw new Error('Profil saknas');
       const payload = {
         vehicle_id: form.vehicle_id,
+        organization_id: profile.organization_id,
+        recorded_by: profile.id,
         log_type: 'charge' as const,
         kwh: form.kwh ? parseFloat(form.kwh) : null,
         cost_sek: form.cost_sek ? parseFloat(form.cost_sek) : null,
@@ -158,6 +162,9 @@ export default function FuelPage() {
                   onChange={(e) => setForm({ ...form, notes: e.target.value })}
                 />
               </div>
+              {saveMutation.error && (
+                <p className="text-sm text-red-600">{String(saveMutation.error)}</p>
+              )}
               <div className="flex justify-end gap-3 pt-2">
                 <button type="button" onClick={() => setShowModal(false)} className="px-4 py-2 text-sm border rounded-md hover:bg-gray-50">
                   Avbryt

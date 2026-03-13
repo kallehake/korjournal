@@ -25,6 +25,7 @@ SPEED_START_KMH  = 5.0
 MAX_TRIP_AGE_H   = 24
 LOOP_SECONDS     = 240   # kör i 4 minuter
 POLL_INTERVAL_S  = 30    # sekunder mellan varje poll
+BYD_SEAL_KWH     = 82.56 # BYD Seal 2024 batterikapacitet (kWh)
 
 
 def sb() -> Client:
@@ -192,6 +193,7 @@ async def run():
         prev_lng    = None
         prev_moving = False
         iteration   = 0
+        soc_at_trip_start: Optional[float] = None
 
         while True:
             elapsed = time.monotonic() - loop_start
@@ -211,11 +213,13 @@ async def run():
 
             speed_kmh = rt.speed        if rt.speed        is not None else 0.0
             odometer  = rt.total_mileage if rt.total_mileage is not None else 0.0
+            soc_pct   = rt.elec_percent  if rt.elec_percent  is not None else None
             lat       = gps.latitude
             lng       = gps.longitude
             gps_ts    = gps.gps_timestamp or now_utc()
 
-            print(f"  {speed_kmh:.1f} km/h | {odometer:.0f} km | {lat},{lng}")
+            soc_str = f" | SOC {soc_pct:.0f}%" if soc_pct is not None else ""
+            print(f"  {speed_kmh:.1f} km/h | {odometer:.0f} km{soc_str} | {lat},{lng}")
 
             # Uppdatera fordonets aktuella mätarställning
             if odometer > 0:
@@ -241,7 +245,8 @@ async def run():
                     else:
                         start_lat, start_lng = lat, lng
 
-                    trip = database.table("trips").insert({
+                    soc_at_trip_start = soc_pct
+                    trip_payload = {
                         "organization_id": org_id,
                         "vehicle_id":      vehicle_id,
                         "driver_id":       driver_id,
@@ -251,7 +256,10 @@ async def run():
                         "start_lng":       start_lng,
                         "odometer_start":  round(odometer),
                         "trip_type":       "private",
-                    }).execute()
+                    }
+                    if soc_pct is not None:
+                        trip_payload["soc_start_pct"] = round(soc_pct)
+                    trip = database.table("trips").insert(trip_payload).execute()
                     active_trip_id = trip.data[0]["id"]
                     print(f"  Resa startad: {active_trip_id}")
                 else:
@@ -267,7 +275,7 @@ async def run():
             else:
                 if active_trip_id:
                     trip_type = get_trip_type_from_geofence(database, org_id, lat, lng)
-                    database.table("trips").update({
+                    end_payload = {
                         "end_time":     gps_ts.isoformat(),
                         "end_lat":      lat,
                         "end_lng":      lng,
@@ -275,13 +283,22 @@ async def run():
                         "odometer_end": round(odometer),
                         "status":       "completed",
                         "trip_type":    trip_type,
-                    }).eq("id", active_trip_id).execute()
+                    }
+                    if soc_pct is not None:
+                        end_payload["soc_end_pct"] = round(soc_pct)
+                        soc_start = soc_at_trip_start or active_trip.get("soc_start_pct")
+                        if soc_start is not None and soc_start > soc_pct:
+                            energy = round((soc_start - soc_pct) / 100.0 * BYD_SEAL_KWH, 2)
+                            end_payload["energy_kwh"] = energy
+                            print(f"  Energi: {energy} kWh (SOC {soc_start:.0f}% -> {soc_pct:.0f}%)")
+                    database.table("trips").update(end_payload).eq("id", active_trip_id).execute()
                     km = odometer - (active_trip.get("odometer_start") or odometer)
                     print(f"  Resa avslutad | Distans: {km:.0f} km")
+                    soc_at_trip_start = None
 
                     # ── Trängselskatt-detektion ───────────────────────────
                     try:
-                        from congestion_stations import detect_passages
+                        from congestion_stations import detect_passages, DAILY_MAX_SEK
                         gps_resp = (database.table("gps_points")
                             .select("timestamp, latitude, longitude")
                             .eq("trip_id", active_trip_id)
@@ -303,26 +320,51 @@ async def run():
                         gps_track.append({"ts": gps_ts.isoformat(), "lat": lat, "lng": lng})
 
                         passages = detect_passages(gps_track)
+
+                        # Hämta dagens redan registrerade trängselskattebelopp per stad
+                        # för att tillämpa dagtaket (Göteborg 60 kr, Stockholm 135 kr)
+                        today_str = gps_ts.astimezone(
+                            __import__("zoneinfo").ZoneInfo("Europe/Stockholm")
+                        ).strftime("%Y-%m-%d")
+                        existing_resp = (database.table("congestion_tax_passages")
+                            .select("city, amount_sek")
+                            .eq("vehicle_id", vehicle_id)
+                            .gte("passage_time", f"{today_str}T00:00:00+00:00")
+                            .execute())
+                        daily_total_by_city: dict = {}
+                        for ep in (existing_resp.data or []):
+                            c = ep["city"]
+                            daily_total_by_city[c] = daily_total_by_city.get(c, 0) + ep["amount_sek"]
+
                         total_congestion = 0
                         for passage in passages:
+                            city = passage["station"]["city"]
+                            daily_max = DAILY_MAX_SEK.get(city, 9999)
+                            already_paid = daily_total_by_city.get(city, 0)
+                            remaining_cap = max(0, daily_max - already_paid)
+                            effective_amount = min(passage["amount_sek"], remaining_cap)
+                            if effective_amount <= 0:
+                                print(f"  Dagtak nått för {city} — hoppar {passage['station']['name']}")
+                                continue
                             database.table("congestion_tax_passages").insert({
-                                "trip_id":        active_trip_id,
-                                "vehicle_id":     vehicle_id,
-                                "station_name":   passage["station"]["name"],
-                                "city":           passage["station"]["city"],
-                                "latitude":       passage["station"]["lat"],
-                                "longitude":      passage["station"]["lng"],
-                                "passage_time":   passage["passage_time"].isoformat(),
-                                "amount_sek":     passage["amount_sek"],
+                                "trip_id":         active_trip_id,
+                                "vehicle_id":      vehicle_id,
+                                "station_name":    passage["station"]["name"],
+                                "city":            passage["station"]["city"],
+                                "latitude":        passage["station"]["lat"],
+                                "longitude":       passage["station"]["lng"],
+                                "passage_time":    passage["passage_time"].isoformat(),
+                                "amount_sek":      effective_amount,
                                 "is_high_traffic": passage["is_high_traffic"],
                             }).execute()
-                            total_congestion += passage["amount_sek"]
-                            print(f"  Trängselskatt: {passage['station']['name']} {passage['amount_sek']} kr")
+                            daily_total_by_city[city] = already_paid + effective_amount
+                            total_congestion += effective_amount
+                            print(f"  Trängselskatt: {passage['station']['name']} {effective_amount} kr")
                         if total_congestion > 0:
                             database.table("trips").update({
                                 "congestion_tax_total": total_congestion,
                             }).eq("id", active_trip_id).execute()
-                            print(f"  Totalt trängselskatt: {total_congestion} kr")
+                            print(f"  Totalt trängselskatt denna resa: {total_congestion} kr")
                     except Exception as cong_err:
                         print(f"  Trängselskatt-detektion misslyckades: {cong_err}", file=sys.stderr)
                 else:
