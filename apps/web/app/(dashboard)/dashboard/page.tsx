@@ -27,6 +27,7 @@ export default function DashboardPage() {
     totalTrips: 0,
     totalDistance: 0,
     businessTrips: 0,
+    businessDistance: 0,
     privateTrips: 0,
     activeVehicles: 0,
   });
@@ -57,7 +58,9 @@ export default function DashboardPage() {
 
       const business = trips.filter((t) => t.trip_type === "business");
       const priv = trips.filter((t) => t.trip_type === "private");
-      const totalDist = trips.reduce((s, t) => s + (t.distance_km ?? (t.odometer_end && t.odometer_start ? t.odometer_end - t.odometer_start : 0)), 0);
+      const tripDist = (t: any) => t.distance_km ?? (t.odometer_end && t.odometer_start ? t.odometer_end - t.odometer_start : 0);
+      const totalDist = trips.reduce((s, t) => s + tripDist(t), 0);
+      const businessDist = business.reduce((s, t) => s + tripDist(t), 0);
 
       // Monthly breakdown for current year
       const byMonth = MONTHS.map((month, i) => ({
@@ -72,6 +75,7 @@ export default function DashboardPage() {
         totalTrips: trips.length,
         totalDistance: Math.round(totalDist),
         businessTrips: business.length,
+        businessDistance: Math.round(businessDist),
         privateTrips: priv.length,
         activeVehicles: vehicles.length,
       });
@@ -120,7 +124,9 @@ export default function DashboardPage() {
         <StatCard
           title="Tjänsteresor"
           value={loading ? "–" : stats.businessTrips}
-          subtitle={stats.totalTrips > 0 ? `${Math.round((stats.businessTrips / stats.totalTrips) * 100)}% av alla resor` : "Inga resor än"}
+          subtitle={stats.totalTrips > 0
+            ? `${Math.round((stats.businessTrips / stats.totalTrips) * 100)}% av resor · ${stats.totalDistance > 0 ? Math.round((stats.businessDistance / stats.totalDistance) * 100) : 0}% av km`
+            : "Inga resor än"}
           color="purple"
           icon={
             <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
