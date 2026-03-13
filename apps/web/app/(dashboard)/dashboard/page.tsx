@@ -14,6 +14,7 @@ import {
   Cell,
   Legend,
 } from "recharts";
+import Link from "next/link";
 import StatCard from "@/components/StatCard";
 import GeoAddress from "@/components/GeoAddress";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
@@ -204,6 +205,7 @@ export default function DashboardPage() {
                   <th className="px-4 py-3">Från → Till</th>
                   <th className="px-4 py-3">Distans</th>
                   <th className="px-4 py-3">Typ</th>
+                  <th className="px-4 py-3"></th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
@@ -224,6 +226,11 @@ export default function DashboardPage() {
                         <span className={trip.trip_type === "business" ? "badge-business" : "badge-private"}>
                           {trip.trip_type === "business" ? "Tjänst" : "Privat"}
                         </span>
+                      </td>
+                      <td className="table-cell">
+                        <Link href={`/trips/${trip.id}`} className="text-sm font-medium text-primary-600 hover:text-primary-800">
+                          Visa
+                        </Link>
                       </td>
                     </tr>
                   );
