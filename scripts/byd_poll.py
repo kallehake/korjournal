@@ -259,7 +259,15 @@ async def run():
                     }
                     if soc_pct is not None:
                         trip_payload["soc_start_pct"] = round(soc_pct)
-                    trip = database.table("trips").insert(trip_payload).execute()
+                    try:
+                        trip = database.table("trips").insert(trip_payload).execute()
+                    except Exception as _e:
+                        if "soc_start_pct" in str(_e):
+                            # Migration 00007 ej applicerad — kör utan SOC-fält
+                            trip_payload.pop("soc_start_pct", None)
+                            trip = database.table("trips").insert(trip_payload).execute()
+                        else:
+                            raise
                     active_trip_id = trip.data[0]["id"]
                     print(f"  Resa startad: {active_trip_id}")
                 else:
@@ -291,7 +299,17 @@ async def run():
                             energy = round((soc_start - soc_pct) / 100.0 * BYD_SEAL_KWH, 2)
                             end_payload["energy_kwh"] = energy
                             print(f"  Energi: {energy} kWh (SOC {soc_start:.0f}% -> {soc_pct:.0f}%)")
-                    database.table("trips").update(end_payload).eq("id", active_trip_id).execute()
+                    try:
+                        database.table("trips").update(end_payload).eq("id", active_trip_id).execute()
+                    except Exception as _e:
+                        if any(col in str(_e) for col in ("soc_end_pct", "soc_start_pct", "energy_kwh")):
+                            # Migration 00007 ej applicerad — kör utan SOC-fält
+                            for col in ("soc_end_pct", "energy_kwh"):
+                                end_payload.pop(col, None)
+                            database.table("trips").update(end_payload).eq("id", active_trip_id).execute()
+                            print("  OBS: SOC/energi-fält hoppas over (kör migration 00007)")
+                        else:
+                            raise
                     km = odometer - (active_trip.get("odometer_start") or odometer)
                     print(f"  Resa avslutad | Distans: {km:.0f} km")
                     soc_at_trip_start = None
