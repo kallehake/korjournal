@@ -36,12 +36,14 @@ export default function TripDetailPage() {
     date: '',
     start_time: '',
     end_time: '',
+    odometer_start: '',
+    odometer_end: '',
   });
 
   // Reset state when navigating between trips
   useEffect(() => {
     setEditing(false);
-    setForm({ trip_type: 'business', purpose: '', visited_person: '', notes: '', customer_id: '', date: '', start_time: '', end_time: '' });
+    setForm({ trip_type: 'business', purpose: '', visited_person: '', notes: '', customer_id: '', date: '', start_time: '', end_time: '', odometer_start: '', odometer_end: '' });
   }, [id]);
 
   const { data: trip, isLoading } = useQuery({
@@ -127,6 +129,8 @@ export default function TripDetailPage() {
       date: trip.date ?? '',
       start_time: toTimeStr(trip.start_time),
       end_time: toTimeStr(trip.end_time),
+      odometer_start: trip.odometer_start != null ? String(trip.odometer_start) : '',
+      odometer_end: trip.odometer_end != null ? String(trip.odometer_end) : '',
     });
     setEditing(true);
   }
@@ -144,6 +148,8 @@ export default function TripDetailPage() {
         date: form.date || null,
         start_time: form.start_time ? `${form.date}T${form.start_time}:00` : null,
         end_time: form.end_time ? `${form.date}T${form.end_time}:00` : null,
+        odometer_start: form.odometer_start ? parseInt(form.odometer_start) : null,
+        odometer_end: form.odometer_end ? parseInt(form.odometer_end) : null,
       })
       .eq('id', id as string);
 
@@ -463,8 +469,33 @@ export default function TripDetailPage() {
           )}
 
           <h2 className="text-lg font-semibold mt-6 mb-4">Körsträcka</h2>
-          <InfoRow label="Mätarställning start" value={trip.odometer_start ? `${trip.odometer_start.toLocaleString()} km` : null} />
-          <InfoRow label="Mätarställning slut" value={trip.odometer_end ? `${trip.odometer_end.toLocaleString()} km` : null} />
+          {editing ? (
+            <div className="py-3 border-b border-gray-100 grid grid-cols-2 gap-3">
+              <div>
+                <label className="block text-sm text-gray-500 mb-1">Mätare start (km)</label>
+                <input
+                  type="number"
+                  value={form.odometer_start}
+                  onChange={e => setForm(f => ({ ...f, odometer_start: e.target.value }))}
+                  className="w-full text-sm border border-gray-300 rounded-md px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div>
+                <label className="block text-sm text-gray-500 mb-1">Mätare slut (km)</label>
+                <input
+                  type="number"
+                  value={form.odometer_end}
+                  onChange={e => setForm(f => ({ ...f, odometer_end: e.target.value }))}
+                  className="w-full text-sm border border-gray-300 rounded-md px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+            </div>
+          ) : (
+            <>
+              <InfoRow label="Mätarställning start" value={trip.odometer_start != null ? `${trip.odometer_start.toLocaleString()} km` : null} />
+              <InfoRow label="Mätarställning slut" value={trip.odometer_end != null ? `${trip.odometer_end.toLocaleString()} km` : null} />
+            </>
+          )}
           <InfoRow label="Körd sträcka" value={formatDistance(trip.distance_km)} />
           <InfoRow label="GPS-sträcka" value={formatDistance(trip.distance_gps_km)} />
           {trip.distance_deviation_pct != null && trip.distance_deviation_pct > 5 && (
