@@ -13,21 +13,6 @@ interface Props {
   gpsPoints?: GpsPoint[];
 }
 
-function decodePolyline(encoded: string): [number, number][] {
-  const points: [number, number][] = [];
-  let index = 0, lat = 0, lng = 0;
-  while (index < encoded.length) {
-    let b: number, shift = 0, result = 0;
-    do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
-    lat += (result & 1) ? ~(result >> 1) : result >> 1;
-    shift = 0; result = 0;
-    do { b = encoded.charCodeAt(index++) - 63; result |= (b & 0x1f) << shift; shift += 5; } while (b >= 0x20);
-    lng += (result & 1) ? ~(result >> 1) : result >> 1;
-    points.push([lat * 1e-5, lng * 1e-5]);
-  }
-  return points;
-}
-
 function FitBounds({ positions }: { positions: [number, number][] }) {
   const map = useMap();
   useEffect(() => {
@@ -40,11 +25,8 @@ function FitBounds({ positions }: { positions: [number, number][] }) {
 }
 
 export default function TripMapInner({ startLat, startLng, endLat, endLng, gpsPoints }: Props) {
-  const [googleRoute, setGoogleRoute] = useState<[number, number][] | null>(null);
-  const [routeLoading, setRouteLoading] = useState(false);
   const [icons, setIcons] = useState<{ start: any; end: any } | null>(null);
 
-  // Initialize Leaflet icons inside useEffect (browser only)
   useEffect(() => {
     import('leaflet').then(L => {
       const base = {
@@ -62,28 +44,15 @@ export default function TripMapInner({ startLat, startLng, endLat, endLng, gpsPo
     });
   }, []);
 
-  // Always use Google Directions for the route line (actual roads)
-  useEffect(() => {
-    if (!startLat || !startLng || !endLat || !endLng) return;
-    setRouteLoading(true);
-    fetch(`/api/directions?origin=${startLat},${startLng}&destination=${endLat},${endLng}`)
-      .then(r => r.json())
-      .then(data => { if (data.polyline) setGoogleRoute(decodePolyline(data.polyline)); })
-      .catch(() => {})
-      .finally(() => setRouteLoading(false));
-  }, [startLat, startLng, endLat, endLng]);
+  const gpsLine: [number, number][] = (gpsPoints ?? []).map(p => [p.latitude, p.longitude]);
 
-  // Route line: Google Directions road route, fallback to straight line
-  const routeLine: [number, number][] = googleRoute
-    ?? (startLat && startLng && endLat && endLng
-        ? [[startLat, startLng], [endLat, endLng]]
-        : []);
-
-  // GPS intermediate points (for position markers, not the route)
-  const gpsMarkers: [number, number][] = (gpsPoints ?? []).map(p => [p.latitude, p.longitude]);
-
-  // All positions for fitting the map bounds
-  const allPositions: [number, number][] = routeLine.length > 0 ? routeLine : gpsMarkers;
+  // Bounds: prefer GPS track, fall back to start/end markers
+  const boundsPositions: [number, number][] = gpsLine.length > 1
+    ? gpsLine
+    : [
+        ...(startLat && startLng ? [[startLat, startLng] as [number, number]] : []),
+        ...(endLat   && endLng   ? [[endLat,   endLng]   as [number, number]] : []),
+      ];
 
   const center: [number, number] = startLat && startLng ? [startLat, startLng] : [59.33, 18.07];
 
@@ -95,12 +64,19 @@ export default function TripMapInner({ startLat, startLng, endLat, endLng, gpsPo
             attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
             url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
           />
-          <FitBounds positions={allPositions} />
+          <FitBounds positions={boundsPositions} />
 
-          {/* Route line along actual roads */}
-          {routeLine.length > 1 && (
-            <Polyline positions={routeLine} color="#2563eb" weight={4} />
+          {/* Route line along GPS track */}
+          {gpsLine.length > 1 && (
+            <Polyline positions={gpsLine} color="#2563eb" weight={4} opacity={0.8} />
           )}
+
+          {/* GPS waypoints as small dots */}
+          {gpsLine.map((pos, i) => (
+            <CircleMarker key={i} center={pos} radius={3} color="#2563eb" fillColor="#93c5fd" fillOpacity={0.8} weight={1}>
+              <Popup>GPS-punkt {i + 1}</Popup>
+            </CircleMarker>
+          ))}
 
           {/* Start/end markers */}
           {startLat && startLng && icons && (
@@ -113,22 +89,11 @@ export default function TripMapInner({ startLat, startLng, endLat, endLng, gpsPo
               <Popup>Slut</Popup>
             </Marker>
           )}
-
-          {/* GPS waypoints as small dots */}
-          {gpsMarkers.map((pos, i) => (
-            <CircleMarker key={i} center={pos} radius={4} color="#2563eb" fillColor="#93c5fd" fillOpacity={0.8} weight={2}>
-              <Popup>GPS-punkt {i + 1}</Popup>
-            </CircleMarker>
-          ))}
         </MapContainer>
       </div>
-      <p className="text-xs text-gray-400 mt-2 text-center">
-        {routeLoading
-          ? 'Hämtar vägkarta...'
-          : googleRoute
-          ? `Väg från Google Maps${gpsMarkers.length > 0 ? ` · ${gpsMarkers.length} GPS-punkter` : ''}`
-          : 'Rak linje (Google Maps ej tillgänglig)'}
-      </p>
+      {gpsLine.length > 0 && (
+        <p className="text-xs text-gray-400 mt-2 text-center">{gpsLine.length} GPS-punkter</p>
+      )}
     </div>
   );
 }
