@@ -147,18 +147,19 @@ export default function DashboardLayout({
 
       {/* Sidebar */}
       <aside
-        className={`fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-charcoal-900 bg-charcoal-800 transition-transform lg:static lg:translate-x-0 ${
+        className={`fixed inset-y-0 left-0 z-50 flex w-64 flex-col border-r border-forest-900 bg-forest-800 transition-transform lg:static lg:translate-x-0 ${
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         }`}
       >
         {/* Logo */}
-        <div className="flex h-16 items-center gap-3 border-b border-charcoal-900 px-6">
-          <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary-500">
-            <svg className="h-5 w-5 text-white" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" d="M8.25 18.75a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0h6m-9 0H3.375a1.125 1.125 0 0 1-1.125-1.125V14.25m17.25 4.5a1.5 1.5 0 0 1-3 0m3 0a1.5 1.5 0 0 0-3 0m3 0h1.125c.621 0 1.129-.504 1.09-1.124a17.902 17.902 0 0 0-3.213-9.193 2.056 2.056 0 0 0-1.58-.86H14.25M16.5 18.75h-2.25m0-11.177v-.958c0-.568-.422-1.048-.987-1.106a48.554 48.554 0 0 0-10.026 0 1.106 1.106 0 0 0-.987 1.106v7.635m12-6.677v6.677m0 4.5v-4.5m0 0h-12" />
-            </svg>
-          </div>
-          <span className="text-lg font-bold text-white" style={{ fontFamily: 'Sora, sans-serif' }}>Körjournal</span>
+        <div className="flex h-20 flex-col items-start justify-center gap-1 border-b border-forest-900 px-6">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="https://projektdirektiv.se/wp-content/uploads/2026/01/Projektdirektiv_logo_vit-2.png"
+            alt="Projektdirektiv"
+            className="h-7 w-auto object-contain"
+          />
+          <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-gray-400">Körjournal</span>
         </div>
 
         {/* Navigation */}
@@ -189,7 +190,7 @@ export default function DashboardLayout({
         </nav>
 
         {/* User section */}
-        <div className="border-t border-charcoal-900 p-4">
+        <div className="border-t border-forest-900 p-4">
           <form action={logout}>
             <button
               type="submit"
@@ -207,7 +208,7 @@ export default function DashboardLayout({
       {/* Main content */}
       <div className="flex flex-1 flex-col overflow-hidden">
         {/* Top bar (mobile) */}
-        <header className="flex h-16 items-center gap-4 border-b border-charcoal-900 bg-charcoal-800 px-4 lg:hidden">
+        <header className="flex h-16 items-center gap-4 border-b border-forest-900 bg-forest-800 px-4 lg:hidden">
           <button
             onClick={() => setSidebarOpen(true)}
             className="rounded-lg p-2 text-gray-300 hover:bg-white/10"

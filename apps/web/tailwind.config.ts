@@ -32,6 +32,11 @@ const config: Config = {
           800: "#32373c",
           900: "#232629",
         },
+        forest: {
+          700: "#4a5c3a",
+          800: "#3a4a2c",
+          900: "#2a3620",
+        },
       },
       fontFamily: {
         sora: ["Sora", "sans-serif"],
