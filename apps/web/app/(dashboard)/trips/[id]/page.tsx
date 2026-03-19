@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useParams, useRouter } from 'next/navigation';
 import { createBrowserClient } from '../../../../lib/supabase/client';
@@ -35,6 +35,12 @@ export default function TripDetailPage() {
     customer_id: '',
   });
 
+  // Reset state when navigating between trips
+  useEffect(() => {
+    setEditing(false);
+    setForm({ trip_type: 'business', purpose: '', visited_person: '', notes: '', customer_id: '' });
+  }, [id]);
+
   const { data: trip, isLoading } = useQuery({
     queryKey: ['trip', id],
     queryFn: async () => {
@@ -58,6 +64,30 @@ export default function TripDetailPage() {
     queryFn: async () => {
       const { data } = await supabase.from('customers').select('id, name').order('name');
       return data ?? [];
+    },
+  });
+
+  // Adjacent trips for prev/next navigation
+  const { data: navData } = useQuery({
+    queryKey: ['trip_nav', id, trip?.start_time],
+    enabled: !!trip?.start_time,
+    queryFn: async () => {
+      const [{ data: newerData }, { data: olderData }] = await Promise.all([
+        // Newer trip = previous in the descending list
+        supabase.from('trips').select('id')
+          .gt('start_time', trip!.start_time)
+          .order('start_time', { ascending: true })
+          .limit(1),
+        // Older trip = next in the descending list
+        supabase.from('trips').select('id')
+          .lt('start_time', trip!.start_time)
+          .order('start_time', { ascending: false })
+          .limit(1),
+      ]);
+      return {
+        prevId: newerData?.[0]?.id ?? null,
+        nextId: olderData?.[0]?.id ?? null,
+      };
     },
   });
 
@@ -106,7 +136,17 @@ export default function TripDetailPage() {
     if (!error) {
       setEditing(false);
       queryClient.invalidateQueries({ queryKey: ['trip', id] });
+      return true;
     }
+    return false;
+  }
+
+  async function navigateTo(targetId: string) {
+    if (editing) {
+      const ok = await save();
+      if (!ok) return;
+    }
+    router.push(`/trips/${targetId}`);
   }
 
   if (isLoading) {
@@ -146,9 +186,35 @@ export default function TripDetailPage() {
 
       {/* Header */}
       <div className="mb-6">
-        <button onClick={() => router.back()} className="text-sm text-blue-600 hover:text-blue-800 mb-3 block">
-          &larr; Tillbaka till resor
-        </button>
+        <div className="flex items-center justify-between mb-3">
+          <button onClick={() => router.back()} className="text-sm text-blue-600 hover:text-blue-800">
+            &larr; Tillbaka till resor
+          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => navData?.prevId && navigateTo(navData.prevId)}
+              disabled={!navData?.prevId || saving}
+              className="flex items-center gap-1 px-3 py-1.5 text-sm border rounded-md hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              title="Föregående resa (nyare)"
+            >
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5" />
+              </svg>
+              Föregående
+            </button>
+            <button
+              onClick={() => navData?.nextId && navigateTo(navData.nextId)}
+              disabled={!navData?.nextId || saving}
+              className="flex items-center gap-1 px-3 py-1.5 text-sm border rounded-md hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+              title="Nästa resa (äldre)"
+            >
+              Nästa
+              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" d="m8.25 4.5 7.5 7.5-7.5 7.5" />
+              </svg>
+            </button>
+          </div>
+        </div>
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-2xl font-bold text-gray-900">Resdetaljer</h1>

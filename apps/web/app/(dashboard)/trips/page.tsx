@@ -7,6 +7,8 @@ import TripTable from '../../../components/TripTable';
 import type { TripFilter } from '@korjournal/shared';
 import type { TripRow } from '../../../components/TripTable';
 
+type BulkTripType = 'business' | 'private';
+
 const emptyForm = {
   date: new Date().toISOString().slice(0, 10),
   start_time: '',
@@ -30,6 +32,7 @@ export default function TripsPage() {
   const pageSize = 25;
   const [showNewTrip, setShowNewTrip] = useState(false);
   const [newTrip, setNewTrip] = useState(emptyForm);
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
   const { data, isLoading } = useQuery({
     queryKey: ['trips', filter, page],
@@ -78,6 +81,20 @@ export default function TripsPage() {
   });
 
   const totalPages = Math.ceil((data?.count ?? 0) / pageSize);
+
+  const bulkUpdateMutation = useMutation({
+    mutationFn: async (tripType: BulkTripType) => {
+      const { error } = await supabase
+        .from('trips')
+        .update({ trip_type: tripType })
+        .in('id', selectedIds);
+      if (error) throw error;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['trips'] });
+      setSelectedIds([]);
+    },
+  });
 
   const saveTripMutation = useMutation({
     mutationFn: async () => {
@@ -288,12 +305,49 @@ export default function TripsPage() {
         </div>
       </div>
 
+      {/* Bulk action bar */}
+      {selectedIds.length > 0 && (
+        <div className="sticky top-2 z-20 mb-4 flex items-center gap-3 rounded-lg border border-blue-200 bg-blue-50 px-4 py-3 shadow-md">
+          <span className="text-sm font-medium text-blue-700">
+            {selectedIds.length} resa{selectedIds.length !== 1 ? 'r' : ''} vald{selectedIds.length !== 1 ? 'a' : ''}
+          </span>
+          <span className="text-sm text-gray-500 ml-2">— Ändra till:</span>
+          <button
+            onClick={() => bulkUpdateMutation.mutate('business')}
+            disabled={bulkUpdateMutation.isPending}
+            className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700 disabled:opacity-50 font-medium"
+          >
+            Tjänsteresa
+          </button>
+          <button
+            onClick={() => bulkUpdateMutation.mutate('private')}
+            disabled={bulkUpdateMutation.isPending}
+            className="px-3 py-1.5 text-sm bg-purple-600 text-white rounded-md hover:bg-purple-700 disabled:opacity-50 font-medium"
+          >
+            Privatresa
+          </button>
+          {bulkUpdateMutation.isPending && (
+            <span className="text-sm text-gray-500">Sparar...</span>
+          )}
+          <button
+            onClick={() => setSelectedIds([])}
+            className="ml-auto text-sm text-gray-500 hover:text-gray-800"
+          >
+            Avmarkera alla
+          </button>
+        </div>
+      )}
+
       {/* Table */}
       {isLoading ? (
         <div className="text-center py-12 text-gray-500">Laddar resor...</div>
       ) : (
         <>
-          <TripTable trips={(data?.data ?? []) as TripRow[]} />
+          <TripTable
+            trips={(data?.data ?? []) as TripRow[]}
+            selectedIds={selectedIds}
+            onSelectionChange={setSelectedIds}
+          />
 
           {/* Pagination */}
           {totalPages > 1 && (

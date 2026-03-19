@@ -22,23 +22,19 @@ export interface TripRow {
 
 interface TripTableProps {
   trips: TripRow[];
+  selectedIds?: string[];
+  onSelectionChange?: (ids: string[]) => void;
 }
 
 type SortField = "date" | "trip_type" | "distance_km" | "status";
 type SortDirection = "asc" | "desc";
 
-export default function TripTable({ trips }: TripTableProps) {
+export default function TripTable({ trips, selectedIds, onSelectionChange }: TripTableProps) {
   const [sortField, setSortField] = useState<SortField>("date");
   const [sortDirection, setSortDirection] = useState<SortDirection>("desc");
 
-  function handleSort(field: SortField) {
-    if (sortField === field) {
-      setSortDirection(sortDirection === "asc" ? "desc" : "asc");
-    } else {
-      setSortField(field);
-      setSortDirection("desc");
-    }
-  }
+  const selectable = !!onSelectionChange;
+  const selected = new Set(selectedIds ?? []);
 
   const sorted = [...trips].sort((a, b) => {
     const aVal = a[sortField];
@@ -50,6 +46,32 @@ export default function TripTable({ trips }: TripTableProps) {
     else if (typeof aVal === "number" && typeof bVal === "number") cmp = aVal - bVal;
     return sortDirection === "asc" ? cmp : -cmp;
   });
+
+  function handleSort(field: SortField) {
+    if (sortField === field) {
+      setSortDirection(sortDirection === "asc" ? "desc" : "asc");
+    } else {
+      setSortField(field);
+      setSortDirection("desc");
+    }
+  }
+
+  function toggleSelect(id: string) {
+    if (!onSelectionChange) return;
+    const next = new Set(selected);
+    if (next.has(id)) next.delete(id);
+    else next.add(id);
+    onSelectionChange([...next]);
+  }
+
+  function toggleAll() {
+    if (!onSelectionChange) return;
+    if (selected.size === sorted.length && sorted.length > 0) {
+      onSelectionChange([]);
+    } else {
+      onSelectionChange(sorted.map((t) => t.id));
+    }
+  }
 
   function SortIcon({ field }: { field: SortField }) {
     if (sortField !== field)
@@ -70,11 +92,25 @@ export default function TripTable({ trips }: TripTableProps) {
     );
   }
 
+  const allSelected = sorted.length > 0 && selected.size === sorted.length;
+  const someSelected = selected.size > 0 && !allSelected;
+
   return (
     <div className="overflow-x-auto rounded-xl border border-gray-200 bg-white shadow-sm">
       <table className="min-w-full divide-y divide-gray-200">
         <thead>
           <tr className="table-header">
+            {selectable && (
+              <th className="px-4 py-3 w-10">
+                <input
+                  type="checkbox"
+                  checked={allSelected}
+                  ref={(el) => { if (el) el.indeterminate = someSelected; }}
+                  onChange={toggleAll}
+                  className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 cursor-pointer"
+                />
+              </th>
+            )}
             <th className="cursor-pointer px-4 py-3" onClick={() => handleSort("date")}>
               Datum <SortIcon field="date" />
             </th>
@@ -94,8 +130,22 @@ export default function TripTable({ trips }: TripTableProps) {
         <tbody className="divide-y divide-gray-100">
           {sorted.map((trip) => {
             const dist = trip.distance_km ?? (trip.odometer_end && trip.odometer_start ? trip.odometer_end - trip.odometer_start : null);
+            const isSelected = selected.has(trip.id);
             return (
-              <tr key={trip.id} className="transition-colors hover:bg-gray-50">
+              <tr
+                key={trip.id}
+                className={`transition-colors hover:bg-gray-50 ${isSelected ? "bg-blue-50 hover:bg-blue-100" : ""}`}
+              >
+                {selectable && (
+                  <td className="px-4 py-3">
+                    <input
+                      type="checkbox"
+                      checked={isSelected}
+                      onChange={() => toggleSelect(trip.id)}
+                      className="h-4 w-4 rounded border-gray-300 text-primary-600 focus:ring-primary-500 cursor-pointer"
+                    />
+                  </td>
+                )}
                 <td className="table-cell font-medium">{trip.date}</td>
                 <td className="table-cell">{trip.driver?.full_name ?? "–"}</td>
                 <td className="table-cell font-mono text-xs">{trip.vehicle?.registration_number ?? "–"}</td>
