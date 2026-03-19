@@ -44,9 +44,10 @@ export default function DashboardPage() {
       const [tripsRes, vehiclesRes] = await Promise.all([
         supabase
           .from("trips")
-          .select("id, trip_type, distance_km, date, start_address, end_address, odometer_start, odometer_end, status, profiles(full_name), vehicles(registration_number)")
+          .select("id, trip_type, distance_km, date, start_time, start_address, end_address, odometer_start, odometer_end, status, profiles(full_name), vehicles(registration_number)")
           .eq("status", "completed")
-          .order("date", { ascending: false }),
+          .order("date", { ascending: false })
+          .order("start_time", { ascending: false }),
         supabase
           .from("vehicles")
           .select("id")
@@ -219,7 +220,14 @@ export default function DashboardPage() {
                   const dist = trip.distance_km ?? (trip.odometer_end && trip.odometer_start ? trip.odometer_end - trip.odometer_start : null);
                   return (
                     <tr key={trip.id} className="transition-colors hover:bg-gray-50">
-                      <td className="table-cell font-medium">{trip.date}</td>
+                      <td className="table-cell font-medium">
+                        <div>{trip.date}</div>
+                        {trip.start_time && (
+                          <div className="text-xs text-gray-400 font-normal">
+                            {new Date(trip.start_time).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })}
+                          </div>
+                        )}
+                      </td>
                       <td className="table-cell">{(trip.profiles as any)?.full_name ?? "–"}</td>
                       <td className="table-cell font-mono text-xs">{(trip.vehicles as any)?.registration_number ?? "–"}</td>
                       <td className="table-cell">
