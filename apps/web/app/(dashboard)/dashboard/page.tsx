@@ -1,25 +1,10 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-  PieChart,
-  Pie,
-  Cell,
-  Legend,
-} from "recharts";
 import Link from "next/link";
 import StatCard from "@/components/StatCard";
 import GeoAddress from "@/components/GeoAddress";
 import { createSupabaseBrowserClient } from "@/lib/supabase/client";
-
-const MONTHS = ["Jan","Feb","Mar","Apr","Maj","Jun","Jul","Aug","Sep","Okt","Nov","Dec"];
 
 export default function DashboardPage() {
   const supabase = createSupabaseBrowserClient();
@@ -30,16 +15,17 @@ export default function DashboardPage() {
     businessDistance: 0,
     privateTrips: 0,
     activeVehicles: 0,
+    monthTrips: 0,
+    monthDistance: 0,
   });
-  const [monthlyData, setMonthlyData] = useState(
-    MONTHS.map((month) => ({ month, resor: 0 }))
-  );
   const [recentTrips, setRecentTrips] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
     async function load() {
-      const year = new Date().getFullYear();
+      const now = new Date();
+      const year = now.getFullYear();
+      const month = now.getMonth();
 
       const [tripsRes, vehiclesRes] = await Promise.all([
         supabase
@@ -47,53 +33,46 @@ export default function DashboardPage() {
           .select("id, trip_type, distance_km, date, start_time, start_address, end_address, odometer_start, odometer_end, status, profiles(full_name), vehicles(registration_number)")
           .eq("status", "completed")
           .order("date", { ascending: false })
-          .order("start_time", { ascending: false }),
-        supabase
-          .from("vehicles")
-          .select("id")
-          .eq("is_active", true),
+          .order("start_time", { ascending: false, nullsFirst: false }),
+        supabase.from("vehicles").select("id").eq("is_active", true),
       ]);
 
       const trips = tripsRes.data ?? [];
       const vehicles = vehiclesRes.data ?? [];
 
+      const tripDist = (t: any) =>
+        t.distance_km ?? (t.odometer_end && t.odometer_start ? t.odometer_end - t.odometer_start : 0);
+
       const business = trips.filter((t) => t.trip_type === "business");
-      const priv = trips.filter((t) => t.trip_type === "private");
-      const tripDist = (t: any) => t.distance_km ?? (t.odometer_end && t.odometer_start ? t.odometer_end - t.odometer_start : 0);
       const totalDist = trips.reduce((s, t) => s + tripDist(t), 0);
       const businessDist = business.reduce((s, t) => s + tripDist(t), 0);
 
-      // Monthly breakdown for current year
-      const byMonth = MONTHS.map((month, i) => ({
-        month,
-        resor: trips.filter((t) => {
-          const d = new Date(t.date);
-          return d.getFullYear() === year && d.getMonth() === i;
-        }).length,
-      }));
+      const thisMonth = trips.filter((t) => {
+        const d = new Date(t.date);
+        return d.getFullYear() === year && d.getMonth() === month;
+      });
+      const monthDist = thisMonth.reduce((s, t) => s + tripDist(t), 0);
 
       setStats({
         totalTrips: trips.length,
         totalDistance: Math.round(totalDist),
         businessTrips: business.length,
         businessDistance: Math.round(businessDist),
-        privateTrips: priv.length,
+        privateTrips: trips.length - business.length,
         activeVehicles: vehicles.length,
+        monthTrips: thisMonth.length,
+        monthDistance: Math.round(monthDist),
       });
-      setMonthlyData(byMonth);
-      setRecentTrips(trips.slice(0, 5));
+      setRecentTrips(trips.slice(0, 10));
       setLoading(false);
     }
     load();
   }, []);
 
-  const tripTypeData = [
-    { name: "Tjänsteresor", value: stats.businessTrips, color: "#2563eb" },
-    { name: "Privatresor", value: stats.privateTrips, color: "#f59e0b" },
-  ];
+  const monthName = new Date().toLocaleString("sv-SE", { month: "long" });
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-gray-900">Dashboard</h1>
         <p className="mt-1 text-sm text-gray-500">Översikt av alla resor och fordon</p>
@@ -101,9 +80,9 @@ export default function DashboardPage() {
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard
-          title="Totalt antal resor"
+          title="Antal resor"
           value={loading ? "–" : stats.totalTrips}
-          subtitle="Avslutade resor"
+          subtitle={loading ? "" : `${stats.monthTrips} st i ${monthName}`}
           color="blue"
           icon={
             <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -114,7 +93,7 @@ export default function DashboardPage() {
         <StatCard
           title="Total distans"
           value={loading ? "–" : `${stats.totalDistance.toLocaleString("sv-SE")} km`}
-          subtitle="Totalt körda kilometer"
+          subtitle={loading ? "" : `${stats.monthDistance.toLocaleString("sv-SE")} km i ${monthName}`}
           color="green"
           icon={
             <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -125,9 +104,11 @@ export default function DashboardPage() {
         <StatCard
           title="Tjänsteresor"
           value={loading ? "–" : stats.businessTrips}
-          subtitle={stats.totalTrips > 0
-            ? `${Math.round((stats.businessTrips / stats.totalTrips) * 100)}% av resor · ${stats.totalDistance > 0 ? Math.round((stats.businessDistance / stats.totalDistance) * 100) : 0}% av km`
-            : "Inga resor än"}
+          subtitle={
+            stats.totalTrips > 0
+              ? `${Math.round((stats.businessTrips / stats.totalTrips) * 100)}% av resor · ${stats.totalDistance > 0 ? Math.round((stats.businessDistance / stats.totalDistance) * 100) : 0}% av km`
+              : "Inga resor än"
+          }
           color="purple"
           icon={
             <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
@@ -148,50 +129,6 @@ export default function DashboardPage() {
         />
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        <div className="card lg:col-span-2">
-          <h2 className="mb-4 text-lg font-semibold text-gray-900">Resor per månad ({new Date().getFullYear()})</h2>
-          <div className="h-80">
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={monthlyData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
-                <XAxis dataKey="month" tick={{ fontSize: 12, fill: "#64748b" }} axisLine={{ stroke: "#e2e8f0" }} />
-                <YAxis tick={{ fontSize: 12, fill: "#64748b" }} axisLine={{ stroke: "#e2e8f0" }} allowDecimals={false} />
-                <Tooltip
-                  contentStyle={{ borderRadius: "8px", border: "1px solid #e2e8f0", boxShadow: "0 4px 6px -1px rgba(0,0,0,0.1)" }}
-                  formatter={(value: number) => [`${value} resor`, "Antal"]}
-                />
-                <Bar dataKey="resor" fill="#2563eb" radius={[4, 4, 0, 0]} maxBarSize={40} />
-              </BarChart>
-            </ResponsiveContainer>
-          </div>
-        </div>
-
-        <div className="card">
-          <h2 className="mb-4 text-lg font-semibold text-gray-900">Fördelning restyp</h2>
-          <div className="h-80">
-            {stats.totalTrips === 0 ? (
-              <div className="flex h-full items-center justify-center text-gray-400 text-sm">Inga resor ännu</div>
-            ) : (
-              <ResponsiveContainer width="100%" height="100%">
-                <PieChart>
-                  <Pie data={tripTypeData} cx="50%" cy="45%" innerRadius={60} outerRadius={90} paddingAngle={4} dataKey="value">
-                    {tripTypeData.map((entry, index) => (
-                      <Cell key={`cell-${index}`} fill={entry.color} />
-                    ))}
-                  </Pie>
-                  <Tooltip
-                    formatter={(value: number) => [`${value} resor`, "Antal"]}
-                    contentStyle={{ borderRadius: "8px", border: "1px solid #e2e8f0" }}
-                  />
-                  <Legend verticalAlign="bottom" formatter={(value) => <span className="text-sm text-gray-600">{value}</span>} />
-                </PieChart>
-              </ResponsiveContainer>
-            )}
-          </div>
-        </div>
-      </div>
-
       <div className="card">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-lg font-semibold text-gray-900">Senaste resor</h2>
@@ -207,7 +144,6 @@ export default function DashboardPage() {
               <thead>
                 <tr className="table-header">
                   <th className="px-4 py-3">Datum</th>
-                  <th className="px-4 py-3">Förare</th>
                   <th className="px-4 py-3">Fordon</th>
                   <th className="px-4 py-3">Från → Till</th>
                   <th className="px-4 py-3">Distans</th>
@@ -228,7 +164,6 @@ export default function DashboardPage() {
                           </div>
                         )}
                       </td>
-                      <td className="table-cell">{(trip.profiles as any)?.full_name ?? "–"}</td>
                       <td className="table-cell font-mono text-xs">{(trip.vehicles as any)?.registration_number ?? "–"}</td>
                       <td className="table-cell">
                         <span className="text-gray-500"><GeoAddress address={trip.start_address} /></span>

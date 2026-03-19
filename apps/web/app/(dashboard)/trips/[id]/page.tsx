@@ -177,7 +177,7 @@ export default function TripDetailPage() {
         start_lng: trip.end_lng ?? null,
         end_lat: trip.start_lat ?? null,
         end_lng: trip.start_lng ?? null,
-        odometer_start: null,
+        odometer_start: trip.odometer_end ?? trip.odometer_start ?? 0,
         odometer_end: null,
         trip_type: trip.trip_type,
         purpose: trip.purpose ?? null,
