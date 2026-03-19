@@ -1,42 +1,49 @@
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@400;500;600;700;800&family=Open+Sans:wght@400;500;600;700&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   :root {
-    --background: #f8fafc;
-    --foreground: #0f172a;
+    --background: #fbf6ea;
+    --foreground: #333333;
     --card: #ffffff;
-    --card-foreground: #0f172a;
-    --border: #e2e8f0;
-    --muted: #f1f5f9;
-    --muted-foreground: #64748b;
+    --card-foreground: #333333;
+    --border: #e8e0d4;
+    --muted: #f5ede0;
+    --muted-foreground: #8a7a6a;
   }
 
   body {
     @apply bg-[var(--background)] text-[var(--foreground)] antialiased;
+    font-family: 'Open Sans', ui-sans-serif, system-ui, sans-serif;
+  }
+
+  h1, h2, h3, h4, h5, h6 {
+    font-family: 'Sora', sans-serif;
   }
 }
 
 @layer components {
   .btn-primary {
-    @apply inline-flex items-center justify-center rounded-lg bg-primary-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
+    @apply inline-flex items-center justify-center rounded-full bg-charcoal-800 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-charcoal-700 focus:outline-none focus:ring-2 focus:ring-charcoal-800 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
   }
 
   .btn-secondary {
-    @apply inline-flex items-center justify-center rounded-lg border border-gray-300 bg-white px-4 py-2.5 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:bg-gray-50 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2;
+    @apply inline-flex items-center justify-center rounded-full border border-[var(--border)] bg-white px-5 py-2.5 text-sm font-semibold text-gray-700 shadow-sm transition-colors hover:bg-cream-200 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2;
   }
 
   .btn-danger {
-    @apply inline-flex items-center justify-center rounded-lg bg-red-600 px-4 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2;
+    @apply inline-flex items-center justify-center rounded-full bg-red-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-red-700 focus:outline-none focus:ring-2 focus:ring-red-500 focus:ring-offset-2;
   }
 
   .card {
-    @apply rounded-xl border border-[var(--border)] bg-[var(--card)] p-6 shadow-sm;
+    @apply rounded-2xl border border-[var(--border)] bg-[var(--card)] p-6 shadow-sm;
   }
 
   .input {
-    @apply block w-full rounded-lg border border-gray-300 bg-white px-3.5 py-2.5 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20 transition-colors;
+    @apply block w-full rounded-xl border border-[var(--border)] bg-white px-3.5 py-2.5 text-sm text-gray-900 shadow-sm placeholder:text-gray-400 focus:border-primary-500 focus:outline-none focus:ring-2 focus:ring-primary-500/20 transition-colors;
   }
 
   .label {
@@ -44,7 +51,7 @@
   }
 
   .table-header {
-    @apply bg-gray-50 text-left text-xs font-semibold uppercase tracking-wider text-gray-500;
+    @apply bg-cream-200 text-left text-xs font-semibold uppercase tracking-wider text-[var(--muted-foreground)];
   }
 
   .table-cell {
@@ -56,19 +63,19 @@
   }
 
   .badge-business {
-    @apply badge bg-blue-100 text-blue-800;
+    @apply badge bg-primary-100 text-primary-800;
   }
 
   .badge-private {
-    @apply badge bg-amber-100 text-amber-800;
+    @apply badge bg-gray-100 text-gray-600;
   }
 
   .nav-link {
-    @apply flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-gray-600 transition-colors hover:bg-primary-50 hover:text-primary-700;
+    @apply flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-[#c8d0d9] transition-colors hover:bg-white/10 hover:text-white;
   }
 
   .nav-link-active {
-    @apply flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium bg-primary-50 text-primary-700;
+    @apply flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium bg-primary-500 text-white;
   }
 }
 
