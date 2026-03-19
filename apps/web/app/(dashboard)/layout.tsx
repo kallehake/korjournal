@@ -155,9 +155,9 @@ export default function DashboardLayout({
         <div className="flex h-20 flex-col items-start justify-center gap-1 border-b border-forest-900 px-6">
           {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
-            src="https://projektdirektiv.se/wp-content/uploads/2026/01/Projektdirektiv_logo_vit-2.png"
+            src="/pd-logo-white.png"
             alt="Projektdirektiv"
-            className="h-7 w-auto object-contain"
+            className="h-7 w-auto object-contain brightness-0 invert"
           />
           <span className="text-[10px] font-semibold uppercase tracking-[0.2em] text-gray-400">Körjournal</span>
         </div>
