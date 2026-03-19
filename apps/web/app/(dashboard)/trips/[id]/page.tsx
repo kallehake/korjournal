@@ -33,12 +33,15 @@ export default function TripDetailPage() {
     visited_person: '',
     notes: '',
     customer_id: '',
+    date: '',
+    start_time: '',
+    end_time: '',
   });
 
   // Reset state when navigating between trips
   useEffect(() => {
     setEditing(false);
-    setForm({ trip_type: 'business', purpose: '', visited_person: '', notes: '', customer_id: '' });
+    setForm({ trip_type: 'business', purpose: '', visited_person: '', notes: '', customer_id: '', date: '', start_time: '', end_time: '' });
   }, [id]);
 
   const { data: trip, isLoading } = useQuery({
@@ -107,6 +110,12 @@ export default function TripDetailPage() {
   const startLabel = useGeocode(trip?.start_lat, trip?.start_lng);
   const endLabel = useGeocode(trip?.end_lat, trip?.end_lng);
 
+  function toTimeStr(ts: string | null | undefined): string {
+    if (!ts) return '';
+    const d = new Date(ts);
+    return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`;
+  }
+
   function startEdit() {
     if (!trip) return;
     setForm({
@@ -115,6 +124,9 @@ export default function TripDetailPage() {
       visited_person: trip.visited_person ?? '',
       notes: trip.notes ?? '',
       customer_id: (trip.customer as any)?.id ?? '',
+      date: trip.date ?? '',
+      start_time: toTimeStr(trip.start_time),
+      end_time: toTimeStr(trip.end_time),
     });
     setEditing(true);
   }
@@ -129,6 +141,9 @@ export default function TripDetailPage() {
         visited_person: form.visited_person || null,
         notes: form.notes || null,
         customer_id: form.customer_id || null,
+        date: form.date || null,
+        start_time: form.start_time ? `${form.date}T${form.start_time}:00` : null,
+        end_time: form.end_time ? `${form.date}T${form.end_time}:00` : null,
       })
       .eq('id', id as string);
 
@@ -136,6 +151,7 @@ export default function TripDetailPage() {
     if (!error) {
       setEditing(false);
       queryClient.invalidateQueries({ queryKey: ['trip', id] });
+      queryClient.invalidateQueries({ queryKey: ['trip_nav', id] });
       return true;
     }
     return false;
@@ -161,6 +177,9 @@ export default function TripDetailPage() {
 
     // start_time är NOT NULL — använd end_time om den finns, annars datum + 00:00
     const startTime = trip.end_time ?? `${trip.date}T00:00:00`;
+    const odomStart = trip.odometer_end ?? trip.odometer_start ?? 0;
+    const dist = trip.distance_km ?? (trip.odometer_end != null && trip.odometer_start != null ? trip.odometer_end - trip.odometer_start : null);
+    const odomEnd = dist != null ? odomStart + Math.round(dist) : null;
 
     const { data: newTrip, error } = await supabase
       .from('trips')
@@ -177,8 +196,8 @@ export default function TripDetailPage() {
         start_lng: trip.end_lng ?? null,
         end_lat: trip.start_lat ?? null,
         end_lng: trip.start_lng ?? null,
-        odometer_start: trip.odometer_end ?? trip.odometer_start ?? 0,
-        odometer_end: null,
+        odometer_start: odomStart,
+        odometer_end: odomEnd,
         trip_type: trip.trip_type,
         purpose: trip.purpose ?? null,
         visited_person: trip.visited_person ?? null,
@@ -337,6 +356,35 @@ export default function TripDetailPage() {
 
           {editing ? (
             <>
+              <div className="py-3 border-b border-gray-100">
+                <label className="block text-sm text-gray-500 mb-1">Datum</label>
+                <input
+                  type="date"
+                  value={form.date}
+                  onChange={e => setForm(f => ({ ...f, date: e.target.value }))}
+                  className="w-full text-sm border border-gray-300 rounded-md px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+              <div className="py-3 border-b border-gray-100 grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-sm text-gray-500 mb-1">Starttid</label>
+                  <input
+                    type="time"
+                    value={form.start_time}
+                    onChange={e => setForm(f => ({ ...f, start_time: e.target.value }))}
+                    className="w-full text-sm border border-gray-300 rounded-md px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm text-gray-500 mb-1">Sluttid</label>
+                  <input
+                    type="time"
+                    value={form.end_time}
+                    onChange={e => setForm(f => ({ ...f, end_time: e.target.value }))}
+                    className="w-full text-sm border border-gray-300 rounded-md px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
               <div className="py-3 border-b border-gray-100">
                 <label className="block text-sm text-gray-500 mb-1">Restyp</label>
                 <select
