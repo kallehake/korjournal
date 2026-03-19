@@ -17,3 +17,9 @@ nul
 gen_types_err.txt
 
 .vercel
+
+# Byggda appar och Python-cache
+apk/
+scripts/__pycache__/
+**/__pycache__/
+*.pyc
