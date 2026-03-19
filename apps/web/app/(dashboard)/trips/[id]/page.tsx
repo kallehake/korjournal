@@ -149,6 +149,47 @@ export default function TripDetailPage() {
     router.push(`/trips/${targetId}`);
   }
 
+  const [creatingReturn, setCreatingReturn] = useState(false);
+
+  async function createReturnTrip() {
+    if (!trip) return;
+    setCreatingReturn(true);
+    const { data: profile } = await supabase.from('profiles').select('id, organization_id').single();
+    if (!profile) { setCreatingReturn(false); return; }
+
+    const { data: newTrip, error } = await supabase
+      .from('trips')
+      .insert({
+        organization_id: profile.organization_id,
+        driver_id: (trip.driver as any)?.id ?? profile.id,
+        vehicle_id: (trip.vehicle as any)?.id ?? null,
+        date: trip.date,
+        start_time: trip.end_time ?? null,
+        end_time: null,
+        start_address: trip.end_address ?? '',
+        end_address: trip.start_address,
+        start_lat: trip.end_lat ?? null,
+        start_lng: trip.end_lng ?? null,
+        end_lat: trip.start_lat ?? null,
+        end_lng: trip.start_lng ?? null,
+        odometer_start: null,
+        odometer_end: null,
+        trip_type: trip.trip_type,
+        purpose: trip.purpose ?? null,
+        visited_person: trip.visited_person ?? null,
+        customer_id: (trip.customer as any)?.id ?? null,
+        notes: trip.notes ?? null,
+        status: 'completed',
+      })
+      .select('id')
+      .single();
+
+    setCreatingReturn(false);
+    if (!error && newTrip) {
+      router.push(`/trips/${newTrip.id}`);
+    }
+  }
+
   if (isLoading) {
     return <div className="text-center py-12 text-gray-500">Laddar resa...</div>;
   }
@@ -237,12 +278,22 @@ export default function TripDetailPage() {
           </div>
           <div className="flex gap-2 shrink-0">
             {!editing ? (
-              <button
-                onClick={startEdit}
-                className="px-5 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 shadow"
-              >
-                ✏️ Redigera resa
-              </button>
+              <>
+                <button
+                  onClick={createReturnTrip}
+                  disabled={creatingReturn}
+                  className="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-lg hover:bg-gray-200 disabled:opacity-50 border"
+                  title="Skapa en ny resa med start och mål ombytta"
+                >
+                  {creatingReturn ? 'Skapar...' : '⇄ Returresa'}
+                </button>
+                <button
+                  onClick={startEdit}
+                  className="px-5 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 shadow"
+                >
+                  ✏️ Redigera resa
+                </button>
+              </>
             ) : (
               <>
                 <button
