@@ -150,12 +150,17 @@ export default function TripDetailPage() {
   }
 
   const [creatingReturn, setCreatingReturn] = useState(false);
+  const [returnError, setReturnError] = useState<string | null>(null);
 
   async function createReturnTrip() {
     if (!trip) return;
     setCreatingReturn(true);
+    setReturnError(null);
     const { data: profile } = await supabase.from('profiles').select('id, organization_id').single();
-    if (!profile) { setCreatingReturn(false); return; }
+    if (!profile) { setCreatingReturn(false); setReturnError('Kunde inte hämta profil'); return; }
+
+    // start_time är NOT NULL — använd end_time om den finns, annars datum + 00:00
+    const startTime = trip.end_time ?? `${trip.date}T00:00:00`;
 
     const { data: newTrip, error } = await supabase
       .from('trips')
@@ -164,9 +169,9 @@ export default function TripDetailPage() {
         driver_id: (trip.driver as any)?.id ?? profile.id,
         vehicle_id: (trip.vehicle as any)?.id ?? null,
         date: trip.date,
-        start_time: trip.end_time ?? null,
+        start_time: startTime,
         end_time: null,
-        start_address: trip.end_address ?? '',
+        start_address: trip.end_address ?? trip.start_address,
         end_address: trip.start_address,
         start_lat: trip.end_lat ?? null,
         start_lng: trip.end_lng ?? null,
@@ -185,7 +190,9 @@ export default function TripDetailPage() {
       .single();
 
     setCreatingReturn(false);
-    if (!error && newTrip) {
+    if (error) {
+      setReturnError(error.message);
+    } else if (newTrip) {
       router.push(`/trips/${newTrip.id}`);
     }
   }
@@ -256,6 +263,9 @@ export default function TripDetailPage() {
             </button>
           </div>
         </div>
+        {returnError && (
+          <div className="mb-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">{returnError}</div>
+        )}
         <div className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-3 flex-wrap">
             <h1 className="text-2xl font-bold text-gray-900">Resdetaljer</h1>

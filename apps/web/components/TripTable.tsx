@@ -7,6 +7,7 @@ import GeoAddress from "./GeoAddress";
 export interface TripRow {
   id: string;
   date: string;
+  start_time?: string | null;
   start_address: string;
   end_address: string | null;
   odometer_start: number;
@@ -44,6 +45,10 @@ export default function TripTable({ trips, selectedIds, onSelectionChange }: Tri
     let cmp = 0;
     if (typeof aVal === "string" && typeof bVal === "string") cmp = aVal.localeCompare(bVal, "sv");
     else if (typeof aVal === "number" && typeof bVal === "number") cmp = aVal - bVal;
+    // Tiebreak on start_time when sorting by date
+    if (cmp === 0 && sortField === "date" && a.start_time && b.start_time) {
+      cmp = a.start_time.localeCompare(b.start_time);
+    }
     return sortDirection === "asc" ? cmp : -cmp;
   });
 
@@ -146,7 +151,14 @@ export default function TripTable({ trips, selectedIds, onSelectionChange }: Tri
                     />
                   </td>
                 )}
-                <td className="table-cell font-medium">{trip.date}</td>
+                <td className="table-cell font-medium">
+                  <div>{trip.date}</div>
+                  {trip.start_time && (
+                    <div className="text-xs text-gray-400 font-normal">
+                      {new Date(trip.start_time).toLocaleTimeString("sv-SE", { hour: "2-digit", minute: "2-digit" })}
+                    </div>
+                  )}
+                </td>
                 <td className="table-cell">{trip.driver?.full_name ?? "–"}</td>
                 <td className="table-cell font-mono text-xs">{trip.vehicle?.registration_number ?? "–"}</td>
                 <td className="table-cell">

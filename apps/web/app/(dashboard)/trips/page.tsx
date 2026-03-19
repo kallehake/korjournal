@@ -46,7 +46,7 @@ export default function TripsPage() {
           customer:customers!customer_id(id, name)
         `, { count: 'exact' })
         .order('date', { ascending: false })
-        .order('start_time', { ascending: false })
+        .order('start_time', { ascending: false, nullsFirst: false })
         .range(page * pageSize, (page + 1) * pageSize - 1);
 
       if (filter.dateFrom) query = query.gte('date', filter.dateFrom);
