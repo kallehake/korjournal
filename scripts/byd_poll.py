@@ -73,7 +73,7 @@ def _dist_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
 
 
 def get_trip_type_from_geofence(database: Client, org_id: str, lat: float, lng: float) -> str:
-    """Returnerar auto_trip_type från matchande geofence, annars 'private'."""
+    """Returnerar auto_trip_type från matchande geofence, annars 'business'."""
     resp = (database.table("geofences")
         .select("auto_trip_type, latitude, longitude, radius_meters")
         .eq("organization_id", org_id)
@@ -81,12 +81,12 @@ def get_trip_type_from_geofence(database: Client, org_id: str, lat: float, lng: 
         .not_.is_("auto_trip_type", "null")
         .execute())
     if not resp or not resp.data:
-        return "private"
+        return "business"
     for gf in resp.data:
         if _dist_m(lat, lng, gf["latitude"], gf["longitude"]) <= gf["radius_meters"]:
             print(f"  Geofence-match: {gf['auto_trip_type']}")
             return gf["auto_trip_type"]
-    return "private"
+    return "business"
 
 
 def get_active_trip(database: Client, vehicle_id: str) -> Optional[dict]:
@@ -255,7 +255,7 @@ async def run():
                         "start_lat":       start_lat,
                         "start_lng":       start_lng,
                         "odometer_start":  round(odometer),
-                        "trip_type":       "private",
+                        "trip_type":       "business",
                     }
                     if soc_pct is not None:
                         trip_payload["soc_start_pct"] = round(soc_pct)
