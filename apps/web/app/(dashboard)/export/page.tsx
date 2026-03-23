@@ -15,6 +15,7 @@ export default function ExportPage() {
   const [vehicleId, setVehicleId] = useState('');
   const [driverId, setDriverId] = useState('');
   const [tripType, setTripType] = useState('');
+  const [customerId, setCustomerId] = useState('');
   const [exporting, setExporting] = useState(false);
 
   const { data: vehicles } = useQuery({
@@ -33,6 +34,14 @@ export default function ExportPage() {
     },
   });
 
+  const { data: customers } = useQuery({
+    queryKey: ['customers-active'],
+    queryFn: async () => {
+      const { data } = await supabase.from('customers').select('id, name').eq('is_active', true).order('name');
+      return data ?? [];
+    },
+  });
+
   const handleExport = async (format: 'pdf') => {
     setExporting(true);
     try {
@@ -40,6 +49,7 @@ export default function ExportPage() {
       if (vehicleId) params.set('vehicle_id', vehicleId);
       if (driverId) params.set('driver_id', driverId);
       if (tripType) params.set('trip_type', tripType);
+      if (customerId) params.set('customer_id', customerId);
 
       const response = await fetch(`/api/report/pdf?${params}`);
 
@@ -127,6 +137,20 @@ export default function ExportPage() {
               <option value="">Alla typer</option>
               <option value="business">Tjänsteresor</option>
               <option value="private">Privatresor</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Kund (fakturaunderlag)</label>
+            <select
+              value={customerId}
+              onChange={(e) => setCustomerId(e.target.value)}
+              className="w-full border rounded-md px-3 py-2 text-sm"
+            >
+              <option value="">Alla kunder</option>
+              {customers?.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
             </select>
           </div>
         </div>

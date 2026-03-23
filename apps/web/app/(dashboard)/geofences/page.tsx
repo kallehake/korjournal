@@ -39,11 +39,31 @@ export default function GeofencesPage() {
     type: 'office' as GeofenceType,
     radius_meters: 200,
     auto_trip_type: '',
+    customer_id: '',
+    project_id: '',
     is_active: true,
   });
   const [searchQuery, setSearchQuery] = useState('');
   const [searching, setSearching] = useState(false);
   const [flyTo, setFlyTo] = useState<[number, number] | null>(null);
+
+  const { data: customers } = useQuery({
+    queryKey: ['customers-active'],
+    queryFn: async () => {
+      const { data } = await supabase.from('customers').select('id, name').eq('is_active', true).order('name');
+      return data ?? [];
+    },
+  });
+
+  const { data: projects } = useQuery({
+    queryKey: ['projects-for-customer', form.customer_id],
+    queryFn: async () => {
+      if (!form.customer_id) return [];
+      const { data } = await supabase.from('projects').select('id, name').eq('customer_id', form.customer_id).eq('is_active', true).order('name');
+      return data ?? [];
+    },
+    enabled: !!form.customer_id,
+  });
 
   const { data: geofences, isLoading } = useQuery({
     queryKey: ['geofences'],
@@ -107,6 +127,8 @@ export default function GeofencesPage() {
         longitude: pin.lng,
         radius_meters: form.radius_meters,
         auto_trip_type: form.auto_trip_type || null,
+        customer_id: form.customer_id || null,
+        project_id: form.project_id || null,
         is_active: form.is_active,
         organization_id: profile!.organization_id,
       };
@@ -144,7 +166,7 @@ export default function GeofencesPage() {
     setPin(null);
     setEditingId(null);
     setShowForm(false);
-    setForm({ name: '', type: 'office', radius_meters: 200, auto_trip_type: '', is_active: true });
+    setForm({ name: '', type: 'office', radius_meters: 200, auto_trip_type: '', customer_id: '', project_id: '', is_active: true });
   }
 
   function startEdit(g: Geofence) {
@@ -156,6 +178,8 @@ export default function GeofencesPage() {
       type: g.type,
       radius_meters: g.radius_meters,
       auto_trip_type: g.auto_trip_type ?? '',
+      customer_id: g.customer_id ?? '',
+      project_id: g.project_id ?? '',
       is_active: g.is_active,
     });
     setShowForm(true);
@@ -267,6 +291,20 @@ export default function GeofencesPage() {
                 <option value="private">Privatresa</option>
               </select>
             </div>
+            <div>
+              <label className="label">Kund (valfritt)</label>
+              <select className="input" value={form.customer_id} onChange={(e) => setForm({ ...form, customer_id: e.target.value, project_id: '' })}>
+                <option value="">Ingen kund</option>
+                {customers?.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="label">Projekt (valfritt)</label>
+              <select className="input" value={form.project_id} onChange={(e) => setForm({ ...form, project_id: e.target.value })} disabled={!form.customer_id}>
+                <option value="">Inget projekt</option>
+                {projects?.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            </div>
           </div>
 
           <div className="flex items-center gap-4 mt-4 pt-4 border-t">
@@ -311,6 +349,11 @@ export default function GeofencesPage() {
                   <p className="text-xs text-gray-500">{g.radius_meters} m radie</p>
                   {g.auto_trip_type && (
                     <p className="text-xs text-blue-600">Auto: {g.auto_trip_type === 'business' ? 'Tjänsteresa' : 'Privatresa'}</p>
+                  )}
+                  {g.customer_id && (
+                    <p className="text-xs text-green-700">
+                      Kund: {customers?.find((c) => c.id === g.customer_id)?.name ?? '…'}
+                    </p>
                   )}
                 </div>
                 <div className="flex gap-3 mt-3 pt-2 border-t border-gray-100">

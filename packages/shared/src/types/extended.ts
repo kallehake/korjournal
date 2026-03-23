@@ -20,6 +20,8 @@ export interface Geofence {
   longitude: number;
   radius_meters: number;
   auto_trip_type: string | null;
+  customer_id: string | null;
+  project_id: string | null;
   is_active: boolean;
   created_at: string;
   updated_at: string;

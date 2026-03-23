@@ -72,21 +72,29 @@ def _dist_m(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
     return R * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
-def get_trip_type_from_geofence(database: Client, org_id: str, lat: float, lng: float) -> str:
-    """Returnerar auto_trip_type från matchande geofence, annars 'business'."""
+def get_geofence_data(database: Client, org_id: str, lat: float, lng: float) -> dict:
+    """
+    Returnerar data från matchande aktiv geofence: trip_type, customer_id, project_id.
+    Söker alla aktiva geofences (inte bara de med auto_trip_type) så att
+    kundkoppling fungerar även utan restypsklassificering.
+    """
     resp = (database.table("geofences")
-        .select("auto_trip_type, latitude, longitude, radius_meters")
+        .select("auto_trip_type, customer_id, project_id, latitude, longitude, radius_meters, name")
         .eq("organization_id", org_id)
         .eq("is_active", True)
-        .not_.is_("auto_trip_type", "null")
         .execute())
+    defaults = {"trip_type": "business", "customer_id": None, "project_id": None}
     if not resp or not resp.data:
-        return "business"
+        return defaults
     for gf in resp.data:
         if _dist_m(lat, lng, gf["latitude"], gf["longitude"]) <= gf["radius_meters"]:
-            print(f"  Geofence-match: {gf['auto_trip_type']}")
-            return gf["auto_trip_type"]
-    return "business"
+            print(f"  Geofence-match: {gf['name']} (kund={gf.get('customer_id')}, projekt={gf.get('project_id')})")
+            return {
+                "trip_type":   gf["auto_trip_type"] if gf["auto_trip_type"] else "business",
+                "customer_id": gf.get("customer_id"),
+                "project_id":  gf.get("project_id"),
+            }
+    return defaults
 
 
 def get_active_trip(database: Client, vehicle_id: str) -> Optional[dict]:
@@ -282,7 +290,7 @@ async def run():
 
             else:
                 if active_trip_id:
-                    trip_type = get_trip_type_from_geofence(database, org_id, lat, lng)
+                    gf_data = get_geofence_data(database, org_id, lat, lng)
                     end_payload = {
                         "end_time":     gps_ts.isoformat(),
                         "end_lat":      lat,
@@ -290,8 +298,12 @@ async def run():
                         "end_address":  geocode(lat, lng),
                         "odometer_end": round(odometer),
                         "status":       "completed",
-                        "trip_type":    trip_type,
+                        "trip_type":    gf_data["trip_type"],
                     }
+                    if gf_data["customer_id"]:
+                        end_payload["customer_id"] = gf_data["customer_id"]
+                    if gf_data["project_id"]:
+                        end_payload["project_id"] = gf_data["project_id"]
                     if soc_pct is not None:
                         end_payload["soc_end_pct"] = round(soc_pct)
                         soc_start = soc_at_trip_start or active_trip.get("soc_start_pct")

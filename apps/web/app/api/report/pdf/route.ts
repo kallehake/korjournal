@@ -10,6 +10,7 @@ export async function GET(request: Request) {
   const vehicleId = searchParams.get('vehicle_id') ?? undefined;
   const driverId = searchParams.get('driver_id') ?? undefined;
   const tripType = searchParams.get('trip_type') ?? undefined;
+  const customerId = searchParams.get('customer_id') ?? undefined;
 
   if (!dateFrom || !dateTo) {
     return NextResponse.json({ error: 'date_from and date_to required' }, { status: 400 });
@@ -59,6 +60,13 @@ export async function GET(request: Request) {
   if (vehicleId) query = query.eq('vehicle_id', vehicleId);
   if (driverId) query = query.eq('driver_id', driverId);
   if (tripType) query = query.eq('trip_type', tripType);
+  if (customerId) query = query.eq('customer_id', customerId);
+
+  let customerName: string | undefined;
+  if (customerId) {
+    const { data: cust } = await supabase.from('customers').select('name').eq('id', customerId).single();
+    customerName = cust?.name;
+  }
 
   const { data: trips, error } = await query;
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
@@ -98,6 +106,7 @@ export async function GET(request: Request) {
 
   const tripRows = allTrips.map((t: any) => {
     const dist = getDist(t);
+    const customerCell = !customerId ? `<td>${(t as any).customer?.name ?? ''}</td>` : '';
     return `<tr>
       <td>${t.date}</td>
       <td>${fmt(t.start_time)}</td>
@@ -112,6 +121,7 @@ export async function GET(request: Request) {
       <td>${t.purpose ?? ''}</td>
       <td>${t.visited_person ?? ''}</td>
       <td class="${t.trip_type === 'business' ? 'biz' : 'priv'}">${t.trip_type === 'business' ? 'Tjänst' : 'Privat'}</td>
+      ${customerCell}
     </tr>`;
   }).join('');
 
@@ -165,6 +175,7 @@ tr:nth-child(even) td{background:#f9f9f9}
 </div>
 <div class="meta">
   <div><strong>Period</strong><span>${dateFrom} &ndash; ${dateTo}</span></div>
+  ${customerName ? `<div><strong>Kund</strong><span>${customerName}</span></div>` : ''}
   <div><strong>Antal resor</strong><span>${allTrips.length}</span></div>
   <div><strong>Tjänsteresor</strong><span>${totalBusiness.toFixed(1)} km</span></div>
   <div><strong>Privatresor</strong><span>${totalPrivate.toFixed(1)} km</span></div>
@@ -174,8 +185,9 @@ tr:nth-child(even) td{background:#f9f9f9}
     <th>Datum</th><th>Start</th><th>Slut</th><th>Reg.nr</th><th>Förare</th>
     <th>Mätare start</th><th>Mätare slut</th><th>Sträcka (km)</th>
     <th>Från</th><th>Till</th><th>Ändamål</th><th>Besökt</th><th>Typ</th>
+    ${!customerId ? '<th>Kund</th>' : ''}
   </tr></thead>
-  <tbody>${tripRows || '<tr><td colspan="13" style="text-align:center;padding:12px;color:#999">Inga resor under perioden</td></tr>'}</tbody>
+  <tbody>${tripRows || `<tr><td colspan="${customerId ? 13 : 14}" style="text-align:center;padding:12px;color:#999">Inga resor under perioden</td></tr>`}</tbody>
 </table>
 <div class="sum-grid">
   <div class="sum-box">
